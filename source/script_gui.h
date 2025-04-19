@@ -286,6 +286,7 @@ struct GuiControlType : public Object
 	FResult LV_InsertModifyCol(optl<int> aColumn, optl<StrArg> aOptions, optl<StrArg> aTitle, int *aRetVal, bool aModify);
 	FResult LV_InsertCol(optl<int> aColumn, optl<StrArg> aOptions, optl<StrArg> aTitle, int &aRetVal)	{ return LV_InsertModifyCol(aColumn, aOptions, aTitle, &aRetVal, false); }
 	FResult LV_ModifyCol(optl<int> aColumn, optl<StrArg> aOptions, optl<StrArg> aTitle)			{ return LV_InsertModifyCol(aColumn, aOptions, aTitle, nullptr, true); }
+	void RescaleListViewColumns(int aNumerator, int aDenominator);
 
 	FResult LV_Delete(optl<int> aRow);
 	FResult LV_DeleteCol(int aColumn);
@@ -544,7 +545,7 @@ public:
 		, mMaxWidth(COORD_UNSPECIFIED), mMaxHeight(COORD_UNSPECIFIED)
 		, mGuiShowHasNeverBeenDone(true), mFirstActivation(true), mShowIsInProgress(false)
 		, mDestroyWindowHasBeenCalled(false), mControlWidthWasSetByContents(false)
-		, mUsesDPIScaling(true), mDPI(0), mDefaultDPIResize(true)
+		, mUsesDPIScaling(true), mDPI(96), mDefaultDPIResize(true)
 		, mDisposed(false)
 		, mVisibleRefCounted(false)
 		, mWidth(COORD_UNSPECIFIED), mHeight(COORD_UNSPECIFIED)
@@ -723,6 +724,9 @@ public:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
 
 	void RescaleForDPI(int aDPI, RECT &aRect);
+	static int RescaleFontForDPI(HFONT aFont, int aOldDPI, int aNewDPI);
+
+	int GetSystemMetrics(int nIndex);
 
 protected:
 	bool Delete() override;

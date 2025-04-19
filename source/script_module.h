@@ -8,9 +8,11 @@ struct ScriptImport
 	ScriptImport *next = nullptr;
 	LineNumberType line_number = 0;
 	FileIndexType file_index = 0;
+	bool wildcard = false;
+	bool is_export = false;
 
 	ScriptImport() {}
-	ScriptImport(ScriptModule *aMod) : mod(aMod), names(_T("*")) {}
+	ScriptImport(ScriptModule *aMod) : mod(aMod), names(_T("*")), wildcard(true) {}
 
 	void *operator new(size_t aBytes) {return SimpleHeap::Alloc(aBytes);}
 	void *operator new[](size_t aBytes) {return SimpleHeap::Alloc(aBytes);}
@@ -31,6 +33,7 @@ public:
 	Var *mSelf = nullptr;
 	UnresolvedBaseClass *mUnresolvedBaseClass = nullptr;
 	FileIndexType *mFiles = nullptr, mFilesCount = 0, mFilesCountMax = 0;
+	FileIndexType mSelfFileIndex = ABSOLUTE_MAX_SOURCE_FILES;
 	bool mExecuted = false;
 	bool mIsBuiltinModule = false;
 

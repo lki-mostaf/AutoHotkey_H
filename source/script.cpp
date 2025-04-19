@@ -123,6 +123,7 @@ FuncEntry g_BIF[] =
 	BIFn(ObjSetBase, 2, 2, BIF_Base),
 	BIFn(ObjSetCapacity, 2, 2, BIF_ObjXXX),
 	BIF1(Ord, 1, 1),
+	BIF1(Props, 1, 1),
 	BIF1(Random, 0, 2),
 	BIFn(RegCreateKey, 0, 1, BIF_Reg),
 	BIFn(RegDelete, 0, 2, BIF_Reg),
@@ -427,13 +428,17 @@ Script::Script()
 
 
 
-void free_dispname();
-Script::~Script() // Destructor.
+void Script::DestroyWindows()
 {
+	// This originally just prevented case WM_DESTROY from calling ExitApp(), but is now
+	// also used to prevent DestroyWindows() from being called more than once:
+	g_DestroyWindowCalled = true;
+
+	// The tray icon, menus, hotkeys, clipboard monitoring, etc. can't function without
+	// a window, and might need to be deregistered before the window is destroyed.
+
 	Hotkey::AllDestruct(); // Unregister hooks and hotkeys.
 	Hotstring::AllDestruct();
-	if (g_FirstThreadID == g_MainThreadID)
-		TerminateSubThreads();
 
 	if (mNIC.hWnd) // Tray icon is installed.
 		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
@@ -441,14 +446,14 @@ Script::~Script() // Destructor.
 	if (mOnClipboardChange.Count()) // Remove from viewer chain.
 		EnableClipboardListener(false);
 
-	// reset count for OnMessage
-	g_MsgMonitor->Dispose();
-	mOnExit.Dispose();
-	mOnClipboardChange.Dispose();
-
 	// The following fixes being unable to paste text copied from an error dialog after the
 	// program exits (if it wasn't already pasted at least once), and may similarly be of
 	// benefit to scripts which directly or indirectly use OLE for clipboard.
+#ifdef _DEBUG
+	// This check appears to be unnecessary in general, but avoids some extraneous debug output.
+	HWND clipboard_owner = GetClipboardOwner(); // This would be an OLE window if OleSetClipboard was used.
+	if (GetWindowThreadProcessId(clipboard_owner, nullptr) == g_MainThreadID && clipboard_owner != g_hWnd)
+#endif
 	OleFlushClipboard();
 
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
@@ -457,11 +462,67 @@ Script::~Script() // Destructor.
 	KILL_DEREF_TIMER
 	KILL_INPUT_TIMER
 	KILL_MAIN_TIMER
-	g_DestroyWindowCalled = true;
 	DestroyWindow(g_hWnd);
 	g_hWnd = NULL;
 
+
 	int i;
+	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
+	// This is because one GUI window might get destroyed and take with it a menu bar that is still
+	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
+	// its menu bar prior to destroying its window.
+	GuiType* gui;
+	while (gui = g_firstGui) // Destroy any remaining GUI windows (due to e.g. circular references). Also: assignment.
+		gui->Destroy();
+	g_lastGui = nullptr;
+	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
+		if (GuiType::sFont[i].hfont)
+			DeleteObject(GuiType::sFont[i].hfont);
+	free(GuiType::sFont);
+	GuiType::sFont = nullptr;
+	GuiType::sFontCount = 0;
+	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
+	// But that should be harmless:
+	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
+
+	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
+	// using it prior to getting rid of the script's custom icon below:
+	if (mCustomIcon)
+	{
+		DestroyIcon(mCustomIcon);
+		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
+	}
+
+	// Since they're not associated with a window, we must free the resources for all popup menus.
+	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
+	// destruction is done AFTER the GUI windows are destroyed:
+	for (UserMenu *n, *m = mFirstMenu; m;)
+	{
+		n = m->mNextMenu;
+		m->Dispose();
+		m->Release();
+		m = n;
+	}
+
+	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
+	for (i = 0; i < MAX_TOOLTIPS; ++i)
+		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
+			DestroyWindow(g_hWndToolTip[i]);
+	memset(g_hWndToolTip, 0, sizeof(g_hWndToolTip));
+}
+
+
+
+void free_dispname();
+Script::~Script() // Destructor.
+{
+	if (g_FirstThreadID == g_MainThreadID)
+		TerminateSubThreads();
+
+	// reset count for OnMessage
+	g_MsgMonitor->Dispose();
+	mOnExit.Dispose();
+	mOnClipboardChange.Dispose();
 
 	if (mFirstTimer) {
 		auto timer = mFirstTimer;
@@ -478,63 +539,12 @@ Script::~Script() // Destructor.
 		if (cp->Callback)
 			cp->Callback->Release();
 
-	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
-	// This is because one GUI window might get destroyed and take with it a menu bar that is still
-	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
-	// its menu bar prior to destroying its window.
-	if (g_firstGui)
-	{
-		GuiType* gui;
-		while (gui = g_firstGui) // Destroy any remaining GUI windows (due to e.g. circular references). Also: assignment.
-			gui->Destroy();
-		g_firstGui = g_lastGui = NULL;
-	}
-	if (GuiType::sFontCount)
-	{
-		for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
-			if (GuiType::sFont[i].hfont)
-				DeleteObject(GuiType::sFont[i].hfont);
-		GuiType::sFontCount = 0;
-		free(GuiType::sFont);
-		GuiType::sFont = NULL;
-	}
-
-	if (g_MainWinClass)
-		UnregisterClass(g_WindowClassMain, g_hInstance), g_WindowClassMain = WINDOW_CLASS_MAIN, g_MainWinClass = 0;
-	if (g_GuiWinClass)
-		UnregisterClass(g_WindowClassGUI, g_hInstance), g_WindowClassGUI = WINDOW_CLASS_GUI, g_GuiWinClass = 0;
-
-	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
-	// But that should be harmless:
-	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
-
-	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
-	// using it prior to getting rid of the script's custom icon below:
-	if (mCustomIcon)
-	{
-		DestroyIcon(mCustomIcon);
-		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
-	}
-
-	// Since they're not associated with a window, we must free the resources for all popup menus.
-	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
-	// destruction is done AFTER the GUI windows are destroyed:
-	for (UserMenu *n, *m = mFirstMenu; m;) // m = m->mNextMenu)
-	{
-		n = m->mNextMenu;
-		m->Dispose();
-		m->Release();
-		m = n;
-	}
-	mFirstMenu = mLastMenu = mTrayMenu = nullptr;
-
 	mDefaultModule.mPrev = &mBuiltinModule;
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 		mod->Free();
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 		mod->Free(true);
-
-	for (i = 0; i < mFuncs.mCount; i++) {
+	for (auto i = 0; i < mFuncs.mCount; i++) {
 		auto &fn = *mFuncs.mItem[i];
 		if (fn.mClass)
 			fn.mClass->Release();
@@ -542,16 +552,16 @@ Script::~Script() // Destructor.
 	}
 	free(mFuncs.mItem), mFuncs = {};
 
-	mPriorHotkeyStartTime = 0;
-	free_compiled_regex();
+	for (auto mod = mLastModule; mod; mod = mod->mPrev)
+		mod->Clear();
+	free(mModules.mItem), mModules = {};
 
+	if (g_MainWinClass)
+		UnregisterClass(g_WindowClassMain, g_hInstance), g_WindowClassMain = WINDOW_CLASS_MAIN, g_MainWinClass = 0;
+	if (g_GuiWinClass)
+		UnregisterClass(g_WindowClassGUI, g_hInstance), g_WindowClassGUI = WINDOW_CLASS_GUI, g_GuiWinClass = 0;
 	if (g_hAccelTable)
-		DestroyAcceleratorTable(g_hAccelTable);
-
-	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
-	for (i = 0; i < MAX_TOOLTIPS; ++i)
-		if (g_hWndToolTip[i])
-			IsWindow(g_hWndToolTip[i]) && DestroyWindow(g_hWndToolTip[i]), g_hWndToolTip[i] = NULL;
+		DestroyAcceleratorTable(g_hAccelTable), g_hAccelTable = NULL;
 
 	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
 	// If there's any chance that a sound was played and not closed out, or that it is still playing,
@@ -566,13 +576,7 @@ Script::~Script() // Destructor.
 		g_SoundWasPlayed = 0;
 	}
 
-	for (auto mod = mLastModule; mod; mod = mod->mPrev)
-		mod->Clear();
-	free(mModules.mItem), mModules = {};
-	mLastModule = nullptr;
-
 	IAhkApi::Finalize();
-	g_script = nullptr;
 
 	// PeekMessage is required to make sure that Ole/CoUninitialize does not hang
 	PeekMessage(&MSG(), NULL, 0, 0, PM_REMOVE);
@@ -649,14 +653,6 @@ Script::~Script() // Destructor.
 #endif // ENABLE_DECIMAL
 
 	free(mScriptName);
-	mScriptName = NULL;
-	mLastLabel = NULL;
-	mCurrLine = NULL;
-	mCurrFileIndex = 0;
-	mCombinedLineNumber = 0;
-
-	mFirstGroup = NULL;
-	mLastGroup = NULL;
 
 	g_HookThreadID = 0;
 	g_nMessageBoxes = 0;
@@ -720,7 +716,6 @@ Script::~Script() // Destructor.
 	g_DestroyWindowCalled = false;
 	g_hWndEdit = NULL;
 	g_hFontEdit = NULL;
-	//g_TabClassProc = NULL;
 	g_modifiersLR_logical = 0;
 	g_modifiersLR_logical_non_ignored = 0;
 	g_modifiersLR_physical = 0;
@@ -759,6 +754,7 @@ Script::~Script() // Destructor.
 	free(g_KeyHistory), g_KeyHistory = NULL;
 	global_clear_state(*g);
 	SimpleHeap::DeleteAll();
+	free_compiled_regex();
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	DeleteCriticalSection(&g_CriticalTLS);
 }
@@ -1730,19 +1726,33 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	// Ensure the current thread is not paused and can't be interrupted
 	// in case one or more objects need to call a __delete meta-function.
 	g_AllowInterruption = FALSE;
-	if (g->IsPaused == true)
-		g->IsPaused = false;
+	g->IsPaused = false;
+#ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
+	g_Debugger->DeleteBreakpoints();
+	g_Debugger->Exit(aExitReason);
+#endif
+
+	// PostQuitMessage() might be needed to prevent hang-on-exit.  Once this is done, no message boxes or
+	// other dialogs can be displayed.  MSDN: "The exit value returned to the system must be the wParam
+	// parameter of the WM_QUIT message."  In our case, PostQuitMessage() should announce the same exit code
+	// that we will eventually call exit() with:
+	PostQuitMessage(aExitCode);
+
+	// Windows are destroyed on exit, before the ~Script() destructor is called, to ensure that any
+	// message monitoring callbacks are called while it is still safe to execute script (it may be
+	// unsafe by the time ~Script() is called since other static objects may or may not have been
+	// destructed already).
+	DestroyWindows();
+
 	delete g_script;
 	g_script = NULL;
 	delete g_clip;
 	delete g_MsgMonitor;
 	g_clip = NULL, g_MsgMonitor = NULL;
-#ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
-	g_Debugger->DeleteBreakpoints();
-	g_Debugger->Exit(aExitReason);
-	g_DebuggerHost.Empty();
+#ifdef CONFIG_DEBUGGER
 	delete g_Debugger;
 	g_Debugger = NULL;
+	g_DebuggerHost.Empty();
 #endif
 	
 #ifndef CONFIG_DLL
@@ -2005,13 +2015,10 @@ bool ClassHasOpenBrace(LPTSTR aBuf, size_t aBufLength, LPTSTR aNextBuf, size_t &
 
 
 
-ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aScriptText)
-// Open the included file.  Returns CONDITION_TRUE if the file is to
-// be loaded, otherwise OK (duplicate/already loaded) or FAIL (error).
-// See "full_path" below for why this is separate to LoadIncludedFile().  
+ResultType Script::SourceFileIndex(LPCTSTR aFileSpec, FileIndexType &aFileIndex)
 {
-	if (!aFileSpec || !*aFileSpec) return FAIL;
-
+	// This is done first for simplicity, even though aFileSpec may already have
+	// an index, because it needs to be done prior to adding mFileSpec (index 0).
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
 		if (Line::sSourceFileCount >= ABSOLUTE_MAX_SOURCE_FILES)
@@ -2043,122 +2050,72 @@ ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAl
 	// allocate the required stack space on entry to the function.
 	TCHAR full_path[T_MAX_PATH];
 
-	int source_file_index = Line::sSourceFileCount;
-	bool is_first_source_file = !source_file_index;
-	if (aScriptText)
+	// Get the full path in case aFileSpec has a relative path.
+	LPTSTR filename_marker;
+	if (*aFileSpec == '*')
 	{
-		if (!mCurrentModule->AddFileIndex(source_file_index))
-			return FAIL;
-		Line::sSourceFile[mCurrFileIndex = source_file_index] = SimpleHeap::Alloc(aFileSpec);
-		TextMem::Buffer textbuf((LPVOID)aScriptText, (DWORD)(_tcslen(aScriptText) * sizeof(TCHAR)), false);
-		ts = new TextMem;
-		ts->Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR
-#ifdef UNICODE
-			, CP_UTF16
-#endif
-		);
-		++Line::sSourceFileCount;
-		return CONDITION_TRUE;
+		tcslcpy(full_path, aFileSpec, _countof(full_path));
+		filename_marker = full_path;
+		while (filename_marker = _tcschr(filename_marker, '/'))
+			*filename_marker = '\\';
 	}
-	if (is_first_source_file && *aFileSpec != '*')
-		// Since this is the first source file, it must be the main script file.  Just point it to the
-		// location of the filespec already dynamically allocated:
-		Line::sSourceFile[source_file_index] = mFileSpec;
+	else if (!Line::sSourceFileCount)
+	{
+		// Since this is the first source file, it must be the main script file.
+		// Just point it to the location of the filespec already allocated:
+		Line::sSourceFile[aFileIndex = Line::sSourceFileCount++] = mFileSpec;
+		return OK;
+	}
 	else
-	{
-		// Get the full path in case aFileSpec has a relative path.  This is done so that duplicates
-		// can be reliably detected (we only want to avoid including a given file more than once):
-		LPTSTR filename_marker;
-		if (*aFileSpec == '*')
+		GetFullPathName(aFileSpec, _countof(full_path), full_path, &filename_marker);
+	
+	// Check if this file already has an index assigned.
+	for (int i = Line::sSourceFileCount - 1; i >= 0; --i)
+		if (!ostrcmpi(Line::sSourceFile[i], full_path)) // Case insensitive like the file system (e.g. "Ä" == "ä" in the NTFS).
 		{
-			tcslcpy(full_path, aFileSpec, _countof(full_path));
-			CharUpper(full_path); // Resource names must be upper-case.
-			while (filename_marker = _tcschr(full_path, '/'))
-				*filename_marker = '\\';
+			aFileIndex = i;
+			return OK;
 		}
-		else
-			GetFullPathName(aFileSpec, _countof(full_path), full_path, &filename_marker);
-		// Check if this file was already included.  If so, it's not an error because we want
-		// to support automatic "include once" behavior.  So ignore repeats if requested by the
-		// caller, otherwise reuse the file index and allocated path:
-		for (source_file_index = 0; source_file_index < Line::sSourceFileCount; ++source_file_index)
-			if (!ostrcmpi(Line::sSourceFile[source_file_index], full_path)) // Case insensitive like the file system (e.g. "Ä" == "ä" in the NTFS).
-				break;
-		// The path is copied into persistent memory further below, after the file has been opened,
-		// in case the opening fails and aIgnoreLoadFailure==true.  Initialize for the check below.
-		Line::sSourceFile[Line::sSourceFileCount] = NULL;
-	}
+
+	// This file might ultimately not be loaded if the *i flag was used, but saving a
+	// small amount of memory in that case seems not worth complicating the logic here.
+	Line::sSourceFile[aFileIndex = Line::sSourceFileCount++] = SimpleHeap::Alloc(full_path);
+	return OK;
+}
+
+
+
+ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aScriptText)
+// Open the included file.  Returns CONDITION_TRUE if the file is to
+// be loaded, otherwise OK (duplicate/already loaded) or FAIL (error).
+// See "full_path" below for why this is separate to LoadIncludedFile().  
+{
+	if (!aFileSpec || !*aFileSpec) return FAIL;
+
+	bool is_first_source_file = !Line::sSourceFileCount;
+
+	FileIndexType source_file_index;
+	if (!SourceFileIndex(aFileSpec, source_file_index))
+		return FAIL;
 
 	bool is_duplicate = mCurrentModule->HasFileIndex(source_file_index);
+	if (aScriptText)
+	{
+		if (!is_duplicate && !mCurrentModule->AddFileIndex(source_file_index))
+			return FAIL;
+		TextMem::Buffer textbuf((LPVOID)aScriptText, (DWORD)(_tcslen(aScriptText) * sizeof(TCHAR)), false);
+		ts = new TextMem;
+		ts->Open(textbuf, DEFAULT_READ_FLAGS, UorA(CP_UTF16, CP_ACP));
+		mCurrFileIndex = source_file_index;
+		return CONDITION_TRUE;
+	}
 	if (is_duplicate && !aAllowDuplicateInclude)
 		return OK;
 
-	LPCTSTR filespec_to_open = aFileSpec;
-	UINT codepage = g_DefaultScriptCodepage;
-
-	TextMem::Buffer textbuf(nullptr, 0, false);
-	HINSTANCE hInstance = g_hInstance;
-	HRSRC hRes = source_file_index ? NULL : g_hResource;
-	if (!hRes && *full_path == '*' && full_path[1]) {
-		LPTSTR terminate_here = _tcsrchr(full_path, '\\'), lpName, lpType;
-		if (terminate_here)
-			*terminate_here = '\0', lpName = terminate_here + 1, lpType = full_path + 1;
-		else lpName = full_path + 1, lpType = RT_RCDATA;
-		if (!(hRes = FindResource(hInstance, lpName, lpType)) && hInstance)
-			hRes = FindResource(hInstance = NULL, lpName, lpType);
-		if (terminate_here)
-			*terminate_here = '\\';
-	}
-	if (hRes)
+	switch (OpenIncludedFile(ts, aFileSpec, true))
 	{
-		HGLOBAL hResData = LoadResource(hInstance, hRes);
-		LPVOID data, aDataBuf;
-		DWORD size, aSizeDeCompressed;
-		if (hResData && (textbuf.mBuffer = data = LockResource(hResData)))
-		{
-			textbuf.mLength = size = SizeofResource(hInstance, hRes);
-			if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
-			{
-#ifndef CONFIG_DLL
-				if (g_hResource && !AHKModule())
-					return FAIL;
-#endif
-				aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
-				if (aSizeDeCompressed)
-				{
-					textbuf.mBuffer = aDataBuf;
-					textbuf.mLength = aSizeDeCompressed;
-					textbuf.mOwned = true;
-					mEncrypt = 3;
-#ifndef CONFIG_DLL
-					if (g_hResource && !AHKModule())
-						return FAIL;
-#endif
-					if (hRes == g_hResource) {
-						VirtualProtect(data, size, PAGE_EXECUTE_READWRITE, &aSizeDeCompressed);
-						memset(data, 0, size);
-						g_hResource = NULL;
-					}
-				}
-				else
-					textbuf.mBuffer = NULL;
-			}
-			else
-				_stprintf(full_path + _tcslen(full_path), _T("?%p#%u.AHK"), data, size);
-		}
-		if (textbuf.mBuffer) {
-			filespec_to_open = textbuf;
-			codepage = CP_UTF8;
-			ts = new TextMem();
-		}
-		else
-			return ScriptError(_T("Could not extract script from EXE."), aFileSpec);
-	}
-	else
-		ts = new TextFile();
-
-	if (!ts || !ts->Open(filespec_to_open, DEFAULT_READ_FLAGS, codepage))
-	{
+	case FAIL: return FAIL;
+	case CONDITION_TRUE:
 		if (aIgnoreLoadFailure)
 			return OK;
 		TCHAR msg_text[T_MAX_PATH + 64]; // T_MAX_PATH vs. MAX_PATH because the full length could be utilized with ErrorStdOut.
@@ -2167,11 +2124,6 @@ ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAl
 		return ScriptError(msg_text);
 	}
 
-	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
-	if (!Line::sSourceFile[source_file_index])
-		Line::sSourceFile[source_file_index] = SimpleHeap::Alloc(full_path);
-	if (source_file_index == Line::sSourceFileCount)
-		++Line::sSourceFileCount;
 	if (!is_duplicate)
 		if (!mCurrentModule->AddFileIndex(source_file_index))
 			return FAIL;
@@ -2197,6 +2149,7 @@ ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAl
 	// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
 	if (source_file_index)
 	{
+		auto full_path = Line::sSourceFile[source_file_index];
 		LPTSTR terminate_here = _tcsrchr(full_path, '\\');
 		if (terminate_here > full_path)
 		{
@@ -2210,6 +2163,97 @@ ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAl
 		SetWorkingDir(mFileDir);
 
 	// Since above did not continue, proceed with loading the file.
+	return CONDITION_TRUE;
+}
+
+
+
+ResultType Script::OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aIsLoading)
+{
+	LPCTSTR filespec_to_open = aFileSpec;
+	UINT codepage = g_DefaultScriptCodepage;
+
+	TextMem::Buffer textbuf(nullptr, 0, false);
+	HRSRC hRes;
+	HMODULE hModule;
+	static auto findResource = [](LPCTSTR aResName, HMODULE &hModule) {
+		LPCTSTR name = _tcsrchr(aResName, '\\'), type;
+		if (name)
+			type = SimpleHeap::Malloc(aResName, name - aResName), name++;
+		else type = RT_RCDATA, name = aResName;
+		auto hRes = FindResource(hModule = NULL, name, type);
+#ifdef CONFIG_DLL
+		if (!hRes)
+			hRes = FindResource(hModule = g_hInstance, name, type);
+#endif // CONFIG_DLL
+		if (name != aResName)
+			SimpleHeap::Delete((void *)type);
+		return hRes;
+		};
+	if (*aFileSpec == '*' && aFileSpec[1] && (hRes = findResource(aFileSpec + 1, hModule)))
+	{
+		HGLOBAL hResData = LoadResource(hModule, hRes);
+		LPVOID res_data, data_buf;
+		DWORD res_size, data_size;
+		if (hResData && (textbuf.mBuffer = res_data = LockResource(hResData)))
+		{
+			textbuf.mLength = res_size = SizeofResource(hModule, hRes);
+			if (*(unsigned int *)res_data == 0x04034b50)
+			{
+				if (!aIsLoading)
+					return FAIL;
+#ifndef CONFIG_DLL
+				if (g_hResource && !AHKModule())
+					return FAIL;
+#endif
+				if (!(data_size = DecompressBuffer(res_data, data_buf, res_size, g_default_pwd)))
+					return CONDITION_TRUE;
+#ifndef CONFIG_DLL
+				if (g_hResource && !AHKModule())
+				{
+					free(data_buf);
+					return FAIL;
+				}
+#endif
+				textbuf.mBuffer = data_buf;
+				textbuf.mLength = data_size;
+				textbuf.mOwned = true;
+				mEncrypt = 3;
+				if (hRes == g_hResource)
+				{
+					VirtualProtect(res_data, res_size, PAGE_EXECUTE_READWRITE, &data_size);
+					memset(res_data, 0, res_size);
+					g_hResource = NULL;
+				}
+			}
+			filespec_to_open = textbuf;
+			codepage = CP_UTF8;
+			ts = new TextMem();
+		}
+		else
+			return CONDITION_TRUE;
+	}
+	else if (!aIsLoading && *aFileSpec == '*')
+	{
+		auto query = _tcsrchr(aFileSpec, '?'), sharp = _tcsrchr(aFileSpec, '#');
+		auto n = (int)sizeof(void *) * 2;
+		if (query + n + 1 != sharp)
+			return CONDITION_TRUE;
+		TCHAR buf[20] = { '0','x',0 };
+		_tcsnccpy(buf + 2, query + 1, n);
+		if (!(textbuf.mBuffer = (LPVOID)ATOU64(buf)))
+			return CONDITION_TRUE;
+		textbuf.mLength = ATOU(sharp + 1);
+		filespec_to_open = textbuf;
+		codepage = UorA(CP_UTF16, CP_ACP);
+		ts = new TextMem();
+	}
+	else
+		ts = new TextFile();
+	if (ts->Open(filespec_to_open, DEFAULT_READ_FLAGS, codepage))
+		return OK;
+	delete ts;
+	ts = nullptr;
 	return CONDITION_TRUE;
 }
 
@@ -2877,10 +2921,8 @@ process_completed_line:
 				return FAIL;
 			goto continue_main_loop;
 		}
-		else if (!mLineParent && !_tcsnicmp(buf, _T("Import"), 6) && IS_SPACE_OR_TAB(buf[6]))
+		else if (!mLineParent && ParseImportStatement(buf))
 		{
-			if (!ParseImportStatement(buf + 7))
-				return FAIL;
 			goto continue_main_loop;
 		}
 
@@ -5414,13 +5456,13 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType)
 		LPTSTR cp;
 		for (cp = action_args; ; )
 		{
+			while (IS_SPACE_OR_TAB(*cp)) ++cp;
 			if (ctolower(cp[0]) == 'i' && ctolower(cp[1]) == 'n' && IS_SPACE_OR_TAB(cp[2]))
 				break;
 			if (!IS_LEADING_IDENTIFIER_CHAR(*cp) && *cp != g_delimiter)
 				return ScriptError(ERR_EXPR_SYNTAX, aLineText);
 			while (IS_IDENTIFIER_CHAR(*cp)) ++cp;
 			if (*cp == g_delimiter) ++cp;
-			while (IS_SPACE_OR_TAB(*cp)) ++cp;
 		}
 		// Replace "in" with a normal arg delimiter, or space if there are no vars.
 		cp[0] = cp == action_args ? ' ' : g_delimiter;
@@ -6426,7 +6468,6 @@ ResultType Script::DefineFunc(LPTSTR aBuf, bool aStatic, FuncDefType aIsInExpres
 	FuncParam param[MAX_FUNCTION_PARAMS];
 	int param_count = 0;
 	TCHAR buf[LINE_SIZE];
-	bool param_must_have_default = false;
 	bool at_least_one_default_expr = false;
 	LPCTSTR saved_pending_hotkey;
 
@@ -6595,22 +6636,18 @@ ResultType Script::DefineFunc(LPTSTR aBuf, bool aStatic, FuncDefType aIsInExpres
 				}
 				param_end = param_start + value_length;
 			}
-			param_must_have_default = true;  // For now, all other params after this one must also have default values.
 			// Set up for the next iteration:
 			param_start = omit_leading_whitespace(param_end);
 		}
 		else if (*param_start == '?')
 		{
 			this_param.default_type = PARAM_DEFAULT_UNSET;
-			param_must_have_default = true;  // For now, all other params after this one must also have default values.
 			// Set up for the next iteration:
 			param_start = omit_leading_whitespace(param_start + 1);
 		}
 		else // This parameter does not have a default value specified.
 		{
-			if (param_must_have_default)
-				return ScriptError(_T("Parameter default required."), this_param.var->mName);
-			++func.mMinParams;
+			func.mMinParams = param_count + 1;
 		}
 		++param_count;
 
@@ -8350,9 +8387,10 @@ ResultType Script::PreparseExpressions(FuncList &aFuncs)
 		// Now that expressions have been preparsed, remove any parameter default expressions
 		// from the normal flow of execution by adjusting the function's mJumpToLine.  (This
 		// wasn't done earlier because the original value is needed above.)
-		if (mLastParamInitializer && func.mMinParams < func.mParamCount)
+		if (mLastParamInitializer)
 		{
-			for (int i = func.mParamCount; --i >= func.mMinParams; )
+			// Search to back to 0 even if mMinParams > 0, for cases like F(a:=b(), c).
+			for (int i = func.mParamCount; --i >= 0; )
 			{
 				if (func.mParam[i].default_type == PARAM_DEFAULT_EXPR)
 				{
@@ -12799,7 +12837,7 @@ ResultType Line::PerformAssign()
 
 
 
-ResultType Script::DerefInclude(LPTSTR &aOutput, LPTSTR aBuf)
+ResultType Script::DerefInclude(LPTSTR &aOutput, LPCTSTR aBuf)
 // For #Include, #IncludeAgain and #DllLoad.
 // Based on Line::Deref above, but with a few differences for backward-compatibility:
 //  1) Percent signs that aren't part of a valid deref are not omitted.
@@ -12811,7 +12849,8 @@ ResultType Script::DerefInclude(LPTSTR &aOutput, LPTSTR aBuf)
 
 	VarSizeType expanded_length;
 	size_t var_name_length;
-	LPTSTR cp, cp1, dest;
+	LPCTSTR cp, cp1;
+	LPTSTR dest;
 
 	// Do two passes:
 	// #1: Calculate the space needed.

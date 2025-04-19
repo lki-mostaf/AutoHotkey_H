@@ -24,6 +24,7 @@ GNU General Public License for more details.
 #include "window.h" // for SetForegroundWindowEx()
 #include "qmath.h" // for qmathLog()
 #include "script_func_impl.h"
+#include <ShellScalingApi.h>
 
 void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool doSkipOver)
 {
@@ -419,6 +420,22 @@ FResult GuiType::__New(optl<StrArg> aOptions, optl<StrArg> aTitle, optl<IObject*
 {
 	if (mHwnd || mDisposed)
 		return FError(ERR_INVALID_USAGE);
+	
+	POINT pt {0,0}; // The window is always created at this position.
+	static auto GetDpiForMonitor = (decltype(&::GetDpiForMonitor))GetProcAddress(GetModuleHandle(_T("shcore.dll")), "GetDpiForMonitor");
+	UINT dpiX, dpiY;
+	if (GetDpiForMonitor && SUCCEEDED(GetDpiForMonitor(MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY), MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
+		mDPI = dpiX;
+	else
+		mDPI = g_ScreenDPI;
+
+	if (g_ScreenDPI != mDPI)
+	{
+		int font_index = RescaleFontForDPI(sFont[0].hfont, g_ScreenDPI, mDPI);
+		if (font_index != -1)
+			mCurrentFontIndex = font_index;
+		//else use default index 0 (unlikely to occur).
+	}
 
 	bool set_last_found_window = false;
 	ToggleValueType own_dialogs = TOGGLE_INVALID;
@@ -2600,8 +2617,6 @@ FResult GuiType::Create(LPCTSTR aTitle)
 	// 3) Possibly other ways.
 	SendMessage(mHwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_icon); // Testing shows that a zero is returned for both;
 	SendMessage(mHwnd, WM_SETICON, ICON_BIG, (LPARAM)big_icon);   // i.e. there is no previous icon to destroy in this case.
-
-	mDPI = g_ScreenDPI;
 
 	return OK;
 }
@@ -7757,8 +7772,15 @@ FResult GuiType::Show(optl<StrArg> aOptions)
 		// If the window has a border or caption this also changes top & left *slightly* from zero.
 		RECT rect = {0, 0, width, height}; // left,top,right,bottom
 		LONG style = GetWindowLong(mHwnd, GWL_STYLE);
+		DWORD ex_style = GetWindowLong(mHwnd, GWL_EXSTYLE);
 		BOOL has_menu = GetMenu(mHwnd) ? TRUE : FALSE;
-		AdjustWindowRectEx(&rect, style, has_menu, GetWindowLong(mHwnd, GWL_EXSTYLE));
+		// AdjustWindowRectEx uses system DPI, which is usually the same as mDPI, except if the DPI
+		// of the primary screen has changed since the process started, or if the GUI has been moved.
+		static auto AdjustWindowRectExForDpi = (decltype(&::AdjustWindowRectExForDpi))GetProcAddress(GetModuleHandle(_T("user32.dll")), "AdjustWindowRectExForDpi");
+		if (AdjustWindowRectExForDpi)
+			AdjustWindowRectExForDpi(&rect, style, has_menu, ex_style, mDPI);
+		else
+			AdjustWindowRectEx(&rect, style, has_menu, ex_style);
 		// MSDN: "The AdjustWindowRectEx function does not take the WS_VSCROLL or WS_HSCROLL styles into
 		// account. To account for the scroll bars, call the GetSystemMetrics function with SM_CXVSCROLL
 		// or SM_CYHSCROLL."
@@ -8405,7 +8427,7 @@ FResult GuiType::SetFont(optl<StrArg> aOptions, optl<StrArg> aFontName)
 	}
 	// Failure of the above is rare because it falls back to default typeface if the one specified
 	// isn't found.  It will have already displayed the error:
-	return FAIL;
+	return FR_FAIL;
 }
 
 
@@ -8415,7 +8437,7 @@ int GuiType::FindOrCreateFont(LPCTSTR aOptions, LPCTSTR aFontName, FontType *aFo
 // caller can see that this is the default-gui-font whenever index 0 is returned).  Returns -1
 // on error, but still sets *aColor to be the color name, if any was specified in aOptions.
 // To prevent a large number of font handles from being created (such as one for each control
-// that uses something other than GUI_DEFAULT_FONT), it seems best to conserve system resources
+// that uses something other than DEFAULT_GUI_FONT), it seems best to conserve system resources
 // by creating new fonts only when called for.  Therefore, this function will first check if
 // the specified font already exists within the array of fonts.  If not found, a new font will
 // be added to the array.
@@ -11702,7 +11724,12 @@ void GuiType::RescaleForDPI(int aDPI, RECT &aRect)
 	// DeferWindowPos isn't used because it doesn't work with mixed parent windows
 	// (such as Tab3 together with other controls), and it seems to give no benefit.
 
-	HFONT last_old_font = NULL, last_new_font = NULL;
+	// Scale the selected font in case this.Add(...) or GuiCtrl.SetFont() is used later.
+	HFONT last_old_font = sFont[mCurrentFontIndex].hfont;
+	int font_index = RescaleFontForDPI(last_old_font, mDPI, aDPI);
+	if (font_index != -1)
+		mCurrentFontIndex = font_index;
+	HFONT last_new_font = sFont[mCurrentFontIndex].hfont;
 
 	for (GuiIndexType i = 0; i < mControlCount; ++i)
 	{
@@ -11724,26 +11751,15 @@ void GuiType::RescaleForDPI(int aDPI, RECT &aRect)
 		if (control.UsesFontAndTextColor())
 		{
 			// Scale the font.
-			FontType font;
-			font.hfont = (HFONT)SendMessage(control.hwnd, WM_GETFONT, 0, 0);
-			if (font.hfont)
+			HFONT hfont = (HFONT)SendMessage(control.hwnd, WM_GETFONT, 0, 0);
+			if (hfont)
 			{
-				if (last_old_font != font.hfont)
+				if (last_old_font != hfont)
 				{
-					FontGetAttributes(font);
-
-					font.lfHeight = MulDiv(font.lfHeight, aDPI, mDPI);
-
-					int font_index = FindFont(font);
+					font_index = RescaleFontForDPI(hfont, mDPI, aDPI);
 					if (font_index == -1)
-					{
-						if (sFontCount >= MAX_GUI_FONTS)
-							continue; // Silent failure.
-						if (!(font.hfont = CreateFontIndirect(&font)))
-							continue; // Silent failure.
-						sFont[font_index = sFontCount++] = font; // Copy the newly created font's attributes into the next array element.
-					}
-					last_old_font = font.hfont;
+						continue; // Silent failure.
+					last_old_font = hfont;
 					last_new_font = sFont[font_index].hfont;
 				}
 
@@ -11770,6 +11786,10 @@ void GuiType::RescaleForDPI(int aDPI, RECT &aRect)
 			if (h - (rect.bottom - rect.top) > item_height / 2)
 				MoveWindow(control.hwnd, x, y, w, rect.bottom - rect.top + item_height, FALSE);
 		}
+		else if (control.type == GUI_CONTROL_LISTVIEW)
+		{
+			control.RescaleListViewColumns(aDPI, mDPI);
+		}
 	}
 	
 	mDPI = aDPI;
@@ -11781,4 +11801,35 @@ void GuiType::RescaleForDPI(int aDPI, RECT &aRect)
 	// A full redraw is needed in some cases to prevent visual glitches, and doesn't
 	// seem useful to avoid in any other case since all of the controls are changing.
 	RedrawWindow(mHwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE);
+}
+
+
+
+int GuiType::RescaleFontForDPI(HFONT aFont, int aOldDPI, int aNewDPI)
+{
+	FontType font;
+	font.hfont = aFont;
+	FontGetAttributes(font);
+
+	font.lfHeight = MulDiv(font.lfHeight, aNewDPI, aOldDPI);
+
+	int font_index = FindFont(font);
+	if (font_index == -1)
+	{
+		if (sFontCount >= MAX_GUI_FONTS)
+			return -1;
+		if (!(font.hfont = CreateFontIndirect(&font)))
+			return -1;
+		sFont[font_index = sFontCount++] = font; // Copy the newly created font's attributes into the next array element.
+	}
+	return font_index;
+}
+
+
+
+int GuiType::GetSystemMetrics(int nIndex)
+{
+	static auto metricForDpi = (decltype(&GetSystemMetricsForDpi))GetProcAddress(GetModuleHandle(_T("user32.dll")), "GetSystemMetricsForDpi");
+	// Get the correct metric for this GUI's DPI, if possible; otherwise revert to the DPI-unaware metric.
+	return metricForDpi ? metricForDpi(nIndex, mDPI) : GetSystemMetrics(nIndex);
 }

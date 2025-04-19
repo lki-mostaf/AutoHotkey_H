@@ -871,6 +871,17 @@ IObject* STDMETHODCALLTYPE IAhkApi::GetEnumerator(IObject* aObj, int aVarCount) 
 }
 
 bool STDMETHODCALLTYPE IAhkApi::CallEnumerator(IObject* aEnumerator, ExprTokenType* aParam[], int aParamCount) {
+	for (int i = 0; i < aParamCount; i++) {
+		auto &param = aParam[i];
+		if (param->IsOptimizedOutputVar()) {
+			auto ref = param->var->GetRef();
+			if (!ref)
+				continue;
+			ref->Release();
+			param = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
+			param->SetValue(ref);
+		}
+	}
 	return ::CallEnumerator(aEnumerator, aParam, aParamCount, false) == CONDITION_TRUE;
 }
 

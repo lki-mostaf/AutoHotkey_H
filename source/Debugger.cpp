@@ -2223,39 +2223,11 @@ DEBUGGER_COMMAND(Debugger::source)
 	// Ensure the file is actually a source file - i.e. don't let the debugger client retrieve any arbitrary file.
 	for (file_index = 0; file_index < Line::sSourceFileCount; ++file_index)
 	{
-		if (!_tcsicmp(filename_t, Line::sSourceFile[file_index]))
+		if (!ostrcmpi(filename_t, Line::sSourceFile[file_index]))
 		{
 			TextStream *ts = nullptr;
-			LPCTSTR file = filename_t;
-			if (*file == '*' && (file = RegExMatch((LPTSTR)file, 
-#ifdef _WIN64
-				_T("\\?[\\dA-F]{16}#\\d+")
-#else
-				_T("\\?[\\dA-F]{8}#\\d+")
-#endif // _WIN64
-			))) {
-				const unsigned int n = sizeof(void*) * 2;
-				TCHAR buf[20] = { '0','x',0 };
-				_tcsnccpy(buf + 2, file + 1, n);
-				auto size = (DWORD)ATOU64(file + 2 + n);
-				auto p = (LPVOID)ATOU64(buf);
-				if (!p || !size)
-					return DEBUGGER_E_CAN_NOT_OPEN_FILE;
-				TextMem::Buffer textbuf(p, size, false);
-				ts = new TextMem;
-				ts->Open(textbuf, DEFAULT_READ_FLAGS | TextStream::DETECT_UTF8
-#ifdef UNICODE
-					, CP_UTF16
-#endif
-				);
-			}
-			else {
-				ts = new TextFile;
-				if (!ts->Open(filename_t, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage)) {
-					delete ts;
-					return DEBUGGER_E_CAN_NOT_OPEN_FILE;
-				}
-			}
+			if (g_script->OpenIncludedFile(ts, filename_t, false) != OK)
+				return DEBUGGER_E_CAN_NOT_OPEN_FILE;
 			mResponseBuf.WriteF("<response command=\"source\" success=\"1\" transaction_id=\"%e\" encoding=\"base64\">"
 								, aTransactionId);
 
@@ -2266,7 +2238,7 @@ DEBUGGER_COMMAND(Debugger::source)
 
 			LineNumberType current_line = 0;
 			
-			while (-1 != (line_length = ts->ReadLine(line_buf + line_remainder, LINE_SIZE)))
+			while (line_length = ts->ReadLine(line_buf + line_remainder, LINE_SIZE))
 			{
 				if (++current_line >= begin_line)
 				{

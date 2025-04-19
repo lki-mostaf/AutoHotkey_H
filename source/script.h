@@ -1438,7 +1438,7 @@ class DECLSPEC_NOVTABLE Func : public Object
 public:
 	LPCTSTR mName;
 	int mParamCount = 0; // The function's maximum number of parameters.  For UDFs, also the number of items in the mParam array.
-	int mMinParams = 0;  // The number of mandatory parameters (populated for both UDFs and built-in's).
+	int mMinParams = 0;  // The index of the last mandatory parameter (populated for both UDFs and built-in's).
 	bool mIsVariadic = false; // Whether to allow mParamCount to be exceeded.
 
 	virtual bool IsBuiltIn() = 0; // FIXME: Should not need to rely on this.
@@ -1541,6 +1541,11 @@ public:
 	bool ArgIsOutputVar(int aArg) override
 	{
 		return aArg < mParamCount && mParam[aArg].is_byref;
+	}
+
+	bool ArgIsOptional(int aArg) override
+	{
+		return aArg >= mParamCount || mParam[aArg].default_type != PARAM_DEFAULT_NONE;
 	}
 
 	// Find a local (not global or nonlocal/outer) variable.
@@ -2323,7 +2328,7 @@ public:
 	UINT mCustomIconNumber; // The number of the icon inside the above file.
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
-	DWORD mEncrypt;
+	USHORT mEncrypt;
 	USHORT mIndex;
 
 	ResultType Init(LPTSTR aScriptFilename, IObject *aArgs);
@@ -2350,7 +2355,9 @@ public:
 	ResultType LoadIncludedFile(LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aScriptText = NULL);
 	ResultType LoadIncludedFile(TextStream *fp);
 	ResultType ParseRemap(LPCTSTR aSource, vk_type remap_dest_vk, LPCTSTR aDestName, LPCTSTR aDestMods);
+	ResultType SourceFileIndex(LPCTSTR aFileSpec, FileIndexType &aFileIndex);
 	ResultType OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aScriptText);
+	ResultType OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aIsLoading);
 	LineNumberType CurrentLine();
 	LPTSTR CurrentFile();
 	static ActionTypeType ConvertActionType(LPCTSTR aActionTypeString);
@@ -2377,6 +2384,8 @@ public:
 	void InitFuncLibraries(FuncLibrary aLibs[]);
 	void InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix);
 	LPTSTR FindLibraryFile(LPTSTR aName, size_t aNameLength, bool aIsModule = false);
+	LPCWSTR InitModuleSearchPath();
+	ResultType FindModuleFileIndex(LPCTSTR aName, FileIndexType &aFileIndex);
 #endif
 	IObject *GetBuiltinObject(LPCTSTR aName);
 	static Func *GetBuiltInFunc(LPCTSTR aFuncName);
@@ -2421,14 +2430,14 @@ public:
 	
 	ScriptModule *CurrentModule() { return g->CurrentFunc ? g->CurrentFunc->mModule : mCurrentModule; }
 	ResultType ParseModuleDirective(LPCTSTR aName);
-	ResultType ParseImportStatement(LPTSTR aBuf);
+	bool ParseImportStatement(LPTSTR aBuf);
 	ResultType CloseCurrentModule();
 	ResultType ResolveImports();
 	ResultType ResolveImports(ScriptImport &aImport);
 	Var *AddNewImportVar(LPTSTR aVarName);
 	Var *FindImportedVar(LPCTSTR aVarName);
 
-	ResultType DerefInclude(LPTSTR &aOutput, LPTSTR aBuf);
+	ResultType DerefInclude(LPTSTR &aOutput, LPCTSTR aBuf);
 
 	WinGroup *FindGroup(LPCTSTR aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(LPCTSTR aGroupName);
@@ -2505,6 +2514,7 @@ public:
 
 	Script();
 	~Script();
+	void DestroyWindows();
 	// Note that the anchors to any linked lists will be lost when this
 	// object goes away, so for now, be sure the destructor is only called
 	// when the program is about to be exited, which will thereby reclaim
@@ -2689,6 +2699,7 @@ BIF_DECL(BIF_Base);
 BIF_DECL(BIF_HasBase);
 BIF_DECL(BIF_HasProp);
 BIF_DECL(BIF_GetMethod);
+BIF_DECL(BIF_Props);
 
 // Advanced file IO interfaces
 BIF_DECL(BIF_FileOpen);

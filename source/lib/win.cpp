@@ -862,6 +862,8 @@ bif_impl FResult ControlGetText(CONTROL_PARAMETERS_DECL, StrRet &aRetVal)
 	// Handle the output parameter.  Note: Using GetWindowTextTimeout() vs. GetWindowText()
 	// because it is able to get text from more types of controls (e.g. large edit controls):
 	size_t estimated_length = GetWindowTextTimeout(control_window);
+	if (!estimated_length)
+		return OK;
 
 	// Allocate memory for the return value.
 	LPTSTR buf = aRetVal.Alloc(estimated_length);
@@ -1631,6 +1633,8 @@ bif_impl FResult WinGetTitle(WINTITLE_PARAMETERS_DECL, StrRet &aRetVal)
 	DETERMINE_TARGET_WINDOW;
 
 	auto estimated_length = GetWindowTextLength(target_window);
+	if (!estimated_length)
+		return OK;
 	auto buf = aRetVal.Alloc(estimated_length);
 	if (!buf)
 		return FR_E_OUTOFMEM;
@@ -1941,7 +1945,7 @@ static FResult WinSetTrans(COLORREF color, LPCTSTR aAlpha, WINTITLE_PARAMETERS_D
 	// GetClassLong) if aValue is entirely blank.
 
 	DWORD flags = color == CLR_NONE ? 0 : LWA_COLORKEY;
-	BYTE alpha;
+	BYTE alpha = 0; // Initialize for debug checks; the actual value isn't used unless LWA_ALPHA flag is set.
 	if (aAlpha && *aAlpha)
 	{
 		flags |= LWA_ALPHA;

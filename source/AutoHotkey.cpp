@@ -53,8 +53,7 @@ typedef LONG(NTAPI *MyNtSetInformationThread)(HANDLE ThreadHandle, ULONG ThreadI
 // Therefore, TLS callback is a very powerful anti-debugging technique
 void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 {
-	if (!(g_hResource = FindResource(NULL, SCRIPT_RESOURCE_NAME, RT_RCDATA))
-		&& !(g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))) {
+	if (!(g_hResource = FindResource(NULL, SCRIPT_RESOURCE_NAME, RT_RCDATA))) {
 		g_TlsDoExecute = true;
 		return;
 	}
@@ -200,13 +199,16 @@ ResultType ParseCmdLineArgs(LPTSTR &script_filespec, int argc, LPTSTR *argv)
 #ifndef AUTOHOTKEYSC // i.e. the following switch is recognized only by AutoHotkey.exe (especially since recognizing new switches in compiled scripts can break them, unlike AutoHotkey.exe).
 		else if (!_tcsicmp(param, _T("/script"))) {
 			script_filespec = NULL; // Override compiled script mode, otherwise no effect.
-			if (g_hResource) {
-				LPVOID data = LockResource(LoadResource(NULL, g_hResource));
+#ifndef CONFIG_DLL
+			HGLOBAL hRes;
+			if (g_hResource && (hRes = LoadResource(NULL, g_hResource))) {
+				LPVOID data = LockResource(hRes);
 				DWORD size = SizeofResource(NULL, g_hResource), old;
 				VirtualProtect(data, size, PAGE_EXECUTE_READWRITE, &old);
 				memset(data, 0, size);
 				g_hResource = NULL;
 			}
+#endif
 		}
 		else if (!_tcsnicmp(param, _T("/NoDebug"), 8))
 			g_script->mEncrypt |= 1;
@@ -453,8 +455,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	AHKModule();
 #endif // !_DEBUG
 #else
-	if (!(g_hResource = FindResource(NULL, SCRIPT_RESOURCE_NAME, RT_RCDATA)))
-		g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
+	g_hResource = FindResource(NULL, SCRIPT_RESOURCE_NAME, RT_RCDATA);
 #endif // ENABLE_TLS_CALLBACK
 
 	g_hInstance = hInstance;
@@ -536,7 +537,8 @@ unsigned __stdcall ThreadMain(void *data)
 
 		auto result = MainExecuteScript();
 		auto exitcode = result ? result : g_script->mPendingExitCode;
-		g_script->TerminateApp(result ? EXIT_CRITICAL : EXIT_EXIT, exitcode);
+		if (g_script)
+			g_script->TerminateApp(result ? EXIT_CRITICAL : EXIT_EXIT, exitcode);
 		if (g_Reloading == 1 && !result)
 			reload = true;
 		g_Reloading = 0;

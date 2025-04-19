@@ -47,17 +47,23 @@ ResultType Script::ParseModuleDirective(LPCTSTR aName)
 }
 
 
-ResultType Script::ParseImportStatement(LPTSTR aBuf)
+bool Script::ParseImportStatement(LPTSTR aBuf)
 {
-	aBuf = omit_leading_whitespace(aBuf);
+	bool is_export = !_tcsnicmp(aBuf, _T("Export"), 6) && IS_SPACE_OR_TAB(aBuf[6]);
+	if (is_export)
+		aBuf = omit_leading_whitespace(aBuf + 7);
+	if (  !(!_tcsnicmp(aBuf, _T("Import"), 6) && IS_SPACE_OR_TAB(aBuf[6]))  )
+		return false;
+	aBuf = omit_leading_whitespace(aBuf + 7);
 	auto imp = new ScriptImport();
 	imp->names = SimpleHeap::Alloc(aBuf);
 	imp->mod = nullptr;
+	imp->is_export = is_export;
 	imp->line_number = mCombinedLineNumber;
 	imp->file_index = mCurrFileIndex;
 	imp->next = mCurrentModule->mImports;
 	mCurrentModule->mImports = imp;
-	return OK;
+	return true;
 }
 
 
@@ -65,7 +71,7 @@ Var *ScriptModule::FindImportedVar(LPCTSTR aVarName)
 {
 	for (auto imp = mImports; imp; imp = imp->next)
 	{
-		if (*imp->names == '*')
+		if (imp->wildcard && imp->mod) // mod can be null during DerefInclude().
 		{
 			auto var = imp->mod->mVars.Find(aVarName);
 			if (var && (var->IsExported() || !imp->names[1]))
@@ -92,12 +98,13 @@ Var *Script::AddNewImportVar(LPTSTR aVarName)
 	auto var = mCurrentModule->mVars.Find(aVarName, &at);
 	if (var)
 	{
-		// Only declared, assigned or exported variables should exist at this point.
-		if (var->IsDeclared() || var->IsAssignedSomewhere())
+		// mVars should contain only declared or exported variables at this point.
+		if (var->IsDeclared())
 		{
 			ConflictingDeclarationError(_T("Import"), var);
 			return nullptr;
 		}
+		ASSERT(!var->IsAssignedSomewhere());
 		var->Scope() |= VAR_DECLARED;
 	}
 	else
@@ -133,40 +140,91 @@ ResultType Script::ResolveImports(ScriptImport &imp)
 	mCombinedLineNumber = imp.line_number;
 	mCurrFileIndex = imp.file_index;
 
-	LPTSTR cp = imp.names, mod_name, var_name = nullptr;
+	LPTSTR cp = imp.names, mod_name, var_name = nullptr, names = nullptr;
+	bool import_file = false;
 	if (*cp == '{' || *cp == '*')
 	{
 		if (*cp == '{')
+		{
+			names = ++cp;
 			cp = _tcschr(cp, '}'); // Should always be found due to GetLineContExpr().
+		}
+		else
+			imp.wildcard = true;
 		cp = omit_leading_whitespace(cp + 1);
 		if (_tcsnicmp(cp, _T("From"), 4) || !IS_SPACE_OR_TAB(cp[4]))
 			return ScriptError(_T("Invalid import"), imp.names);
 		cp = omit_leading_whitespace(cp + 5);
-		mod_name = cp;
 	}
+	if (import_file = (*cp == '"' || *cp == '\''))
+	{
+		mod_name = cp + 1;
+		cp += FindTextDelim(cp, *cp, 1);
+		if (!*cp || cp[1] && !IS_SPACE_OR_TAB(cp[1]))
+			return ScriptError(_T("Invalid import"), imp.names);
+		*cp++ = '\0';
+		ConvertEscapeSequences(mod_name);
+  	}
 	else
 	{
-		var_name = mod_name = cp;
-		while (*cp && !IS_SPACE_OR_TAB(*cp)) ++cp;
+		mod_name = cp;
+		cp = find_identifier_end(cp);
+		if (cp == mod_name || *cp && !IS_SPACE_OR_TAB(*cp))
+			return ScriptError(_T("Invalid import"), imp.names);
 		if (*cp)
+			*cp++ = '\0';
+	}
+	if (*cp) // There's a character after the quote or space which terminates the module name/path.
+	{
+		cp = omit_leading_whitespace(cp);
+		auto c = *cp;
+		if (!_tcsnicmp(cp, _T("as"), 2) && IS_SPACE_OR_TAB(cp[2]))
 		{
-			*cp = '\0';
-			cp = omit_leading_whitespace(cp + 1);
-			if (_tcsnicmp(cp, _T("as"), 2) || !IS_SPACE_OR_TAB(cp[2]))
-				return ScriptError(_T("Invalid import"), imp.names);
 			var_name = omit_leading_whitespace(cp + 3);
+			if (IS_IDENTIFIER_CHAR(*var_name))
+			{
+				cp = find_identifier_end(var_name);
+				c = *cp;
+				*cp = '\0';
+				while (IS_SPACE_OR_TAB(c)) c = *++cp;
+			}
+		}
+		if (c == '{' && !names)
+			names = cp + 1;
+		else if (c)
+		{
+			*cp = c;
+			return ScriptError(_T("Invalid import"), cp);
 		}
 	}
+	else if (mod_name == imp.names) // `Import M`, not `Import {} from M` or `Import "file"`.
+		var_name = mod_name;
 
 	int at;
 	if (  !(imp.mod = mModules.Find(mod_name, &at))  )
 	{
-		if (auto path = FindLibraryFile(mod_name, _tcslen(mod_name), true))
+		FileIndexType file_index;
+		switch (FindModuleFileIndex(mod_name, file_index))
 		{
+		default:	return ScriptError(_T("Module not found"), mod_name);
+		case FAIL:	return FAIL;
+		case OK:	break;
+		}
+		// Search by file index in case of two different paths referring to the same file.
+		for (int i = 0; i < mModules.mCount; ++i)
+			if (mModules.mItem[i]->mSelfFileIndex == file_index)
+			{
+				imp.mod = mModules.mItem[i];
+				break;
+			}
+		if (!imp.mod)
+		{
+			auto path = Line::sSourceFile[file_index];
 			auto cur_mod = mCurrentModule;
 			auto last_mod = mLastModule;
 			mLastModule = nullptr; // Start a new chain.
 			imp.mod = mCurrentModule = new ScriptModule(mod_name);
+			imp.mod->mSelfFileIndex = file_index;
 			if (!mModules.Insert(imp.mod, at))
 				return MemoryError();
 			if (!LoadIncludedFile(path, false, false))
@@ -178,8 +236,6 @@ ResultType Script::ResolveImports(ScriptImport &imp)
 			imp.mod->mPrev = last_mod; // Join to previous chain.
 			mCurrentModule = cur_mod;
 		}
-		else
-			return ScriptError(_T("Module not found"), mod_name);
 	}
 
 	if (var_name)
@@ -200,39 +256,55 @@ ResultType Script::ResolveImports(ScriptImport &imp)
 			var->Assign(imp.mod);
 			var->MakeReadOnly();
 		}
+		if (imp.is_export)
+			var->Scope() |= VAR_EXPORTED;
 	}
 
-	if (*imp.names == '{')
+	if (names)
 	{
-		for (cp = imp.names + 1; *(cp = omit_leading_whitespace(cp)) != '}'; ++cp)
+		for (cp = names; *(cp = omit_leading_whitespace(cp)) != '}'; ++cp)
 		{
-			auto c = *(cp = find_identifier_end(var_name = mod_name = cp));
-			*cp = '\0';
-			while (IS_SPACE_OR_TAB(c)) c = *++cp; // Find next non-whitespace.
-			auto exported = imp.mod->mVars.Find(mod_name);
-			if (!exported)
-				return ScriptError(_T("No such export"), mod_name);
-			if (!_tcsnicmp(cp, _T("as"), 2) && IS_SPACE_OR_TAB(cp[2]))
+			TCHAR c;
+			if (*cp == '*')
 			{
-				var_name = omit_leading_whitespace(cp + 3);
-				cp = find_identifier_end(var_name);
-				c = *cp;
+				imp.wildcard = true;
+				c = *(cp = omit_leading_whitespace(cp + 1));
+			}
+			else
+			{
+				c = *(cp = find_identifier_end(var_name = mod_name = cp));
 				*cp = '\0';
 				while (IS_SPACE_OR_TAB(c)) c = *++cp; // Find next non-whitespace.
+				auto exported = imp.mod->mVars.Find(mod_name);
+				if (!exported)
+					return ScriptError(_T("No such export"), mod_name);
+				if (!_tcsnicmp(cp, _T("as"), 2) && IS_SPACE_OR_TAB(cp[2]))
+				{
+					var_name = omit_leading_whitespace(cp + 3);
+					cp = find_identifier_end(var_name);
+					c = *cp;
+					*cp = '\0';
+					while (IS_SPACE_OR_TAB(c)) c = *++cp; // Find next non-whitespace.
+				}
+				auto imported = AddNewImportVar(var_name);
+				if (!imported)
+					return FAIL;
+				imported->UpdateAlias(exported); // See the other UpdateAlias call above for comments.
+				if (imp.is_export)
+					imported->Scope() |= VAR_EXPORTED;
 			}
-			if (!(c == ',' || c == '}'))
+			if (c == '}')
+				break;
+			if (c != ',')
 			{
 				*cp = c;
 				return ScriptError(_T("Invalid import"), cp);
 			}
-			auto imported = AddNewImportVar(var_name);
-			if (!imported)
-				return FAIL;
-			imported->UpdateAlias(exported); // See the other UpdateAlias call above for comments.
-			if (c == '}')
-				break;
 		}
 	}
+
+	if (imp.is_export && imp.wildcard)
+		return ScriptError(_T("Cannot export *"));
 
 	return OK;
 }
@@ -244,6 +316,9 @@ ResultType Script::CloseCurrentModule()
 	// all control flow statements that need it have a non-null mRelatedLine.
 	if (!AddLine(ACT_EXIT))
 		return FAIL;
+
+	// Reset this so #HotIf doesn't carry across into the next module.
+	g->HotCriterion = nullptr;
 
 	mCurrentModule->mPrev = mLastModule;
 	mLastModule = mCurrentModule;
@@ -290,6 +365,97 @@ IObject *ScriptModule::FindGlobalObject(LPCTSTR aName)
 		return var->ToObject();
 	}
 	return nullptr;
+}
+
+
+LPCWSTR Script::InitModuleSearchPath()
+{
+	SetCurrentDirectory(mFileDir);
+
+	// The size of this array sets the total limit for the entire list of directories, resolved to full paths.
+	// This is enough for extreme cases, up to the total limit for all environment variables (32767 chars).
+	TCHAR buf[MAX_WIDE_PATH], var_buf[MAX_WIDE_PATH];
+	LPTSTR d, cp = buf;
+	LPCTSTR path_spec;
+	DWORD len, space;
+
+	if (GetEnvironmentVariable(L"AhkImportPath", var_buf, _countof(var_buf)))
+		path_spec = var_buf;
+	else
+		path_spec = _T(".;%A_MyDocuments%\\AutoHotkey;%A_AhkPath%\\..");
+
+	LPTSTR deref_path;
+	if (!DerefInclude(deref_path, path_spec))
+		return _T("");
+
+	for (auto p = deref_path; *p; p = d + 1)
+	{
+		while (*p == ';') ++p;
+		for (d = p; *d && *d != ';'; ++d);
+		if (d == p // Empty item at the end.
+			|| (cp - buf) + (d - p) + 1 > _countof(buf)) // Due to rarity, ignore any items that won't fit.
+			break;
+		*d = '\0'; // Terminate within deref_path.
+		space = (DWORD)(_countof(buf) - (cp - buf));
+		len = GetFullPathName(p, space, cp, nullptr);
+		if (!len || len >= space)
+			continue; // Ignore this item.
+		cp += len + 1; // Write the next item after the null terminator.
+	}
+	if (cp == buf) // No items; could happen in the case of a malformed env var.
+		*cp++ = '\0'; // Ensure double-null termination.
+	
+	free(deref_path);
+	return SimpleHeap::Alloc(buf, cp - buf);
+}
+
+
+ResultType Script::FindModuleFileIndex(LPCTSTR aName, FileIndexType &aFileIndex)
+{
+	if (*aName == '*') // *Resource name or stdin.
+		return SourceFileIndex(aName, aFileIndex);
+
+	static auto search_path = InitModuleSearchPath();
+	const auto suffix = EXT_AUTOHOTKEY;
+	const auto suffix_length = _countof(EXT_AUTOHOTKEY) - 1;
+	const auto dir_suffix = _T("\\__Init") EXT_AUTOHOTKEY;
+	const auto dir_suffix_length = _countof(_T("\\__Init") EXT_AUTOHOTKEY) - 1;
+
+	TCHAR buf[T_MAX_PATH];
+	
+	auto name_length = _tcslen(aName);
+	if (name_length + dir_suffix_length >= _countof(buf))
+		return CONDITION_FALSE;
+
+	DWORD attr;
+	size_t dir_length;
+	for (auto dir = search_path; *dir; dir += dir_length + 1)
+	{
+		dir_length = _tcslen(dir);
+		if (!SetCurrentDirectory(dir))
+			continue; // Ignore this item.
+
+		tmemcpy(buf, aName, name_length + 1);
+
+		// Try exact aName first.
+		attr = GetFileAttributes(buf);
+		auto p = buf + name_length;
+		if ((attr & FILE_ATTRIBUTE_DIRECTORY) && attr != INVALID_FILE_ATTRIBUTES)
+		{
+			// Try aName\__module.ahk.
+			tmemcpy(p, dir_suffix, dir_suffix_length + 1);
+			attr = GetFileAttributes(buf);
+		}
+		if (attr & FILE_ATTRIBUTE_DIRECTORY) // No file found yet.
+		{
+			// Try aName.ahk.
+			tmemcpy(p, suffix, suffix_length + 1);
+			attr = GetFileAttributes(buf);
+		}
+		if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0) // File exists and is not a directory.
+			return SourceFileIndex(buf, aFileIndex);
+	}
+	return CONDITION_FALSE;
 }
 
 
