@@ -1113,6 +1113,7 @@ private:
 	UINT indent_len = 0;
 	UINT deep = 0;
 	UINT depth = -1;
+	BOOL escapeUnicode = FALSE;
 	TString str;
 	void append(Array *obj);
 	void append(Object *obj);

@@ -1082,9 +1082,11 @@ void JSON::Stringify(ResultToken &aResultToken, ExprTokenType *aParam[], int aPa
 		if (!ParamIndexIsOmitted(1)) {
 			ExprTokenType val = *aParam[1];
 			if (auto opts = dynamic_cast<Object *>(TokenToObject(val))) {
-				if (opts->GetOwnProp(val, _T("depth")))
+				if (opts->GetOwnProp(val, _T("Depth")))
 					depth = (UINT)TokenToInt64(val), indent = _T("\t"), indent_len = 1;
-				if (!opts->GetOwnProp(val, _T("indent")))
+				if (opts->GetOwnProp(val, _T("EscapeUnicode")) && TokenToBOOL(val))
+					escapeUnicode = TRUE;
+				if (!opts->GetOwnProp(val, _T("Indent")))
 					val.symbol = SYM_MISSING;
 			}
 			if (val.symbol != SYM_MISSING) {
@@ -1124,24 +1126,35 @@ void JSON::append(LPTSTR s) {
 		  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,'\\',   0,   0,   0, // 50~5F
 	};
 	TCHAR escbuf[7] = _T("\\u0000");
+	TCHAR escbuf2[7] = _T("\\u0000");
 	LPTSTR b;
 	TCHAR c, ch;
 	size_t sz;
 
 	for (b = s; ch = *s; s++) {
-		if (ch < 0x60 && (c = escape[ch])) {
+		if (ch < 0x60 ? (c = escape[ch]) : 
+			ch > 0x7e && escapeUnicode && (c = 'U')) {
 			if (b) {
 				if (sz = s - b)
 					str.append(b, sz);
 				b = NULL;
 			}
-			if (c == 'u') {
+			switch (c)
+			{
+			case 'U':
+				for (WORD i = 5, c = ch; i > 1; i--)
+					escbuf2[i] = hexDigits[c & 0xf], c >>= 4;
+				str += escbuf2;
+				break;
+			case 'u':
 				escbuf[4] = hexDigits[ch >> 4];
 				escbuf[5] = hexDigits[ch & 0xf];
 				str += escbuf;
-			}
-			else
+				break;
+			default:
 				str.append('\\'), str.append(c);
+				break;
+			}
 		}
 		else if (!b)
 			b = s;
