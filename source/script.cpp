@@ -1558,6 +1558,8 @@ ResultType Script::ExitApp(ExitReasons aExitReason)
 // for times when it would be unsafe to call MsgBox() due to the possibility that it would
 // make the situation even worse).
 {
+	if (g_DestroyWindowCalled)
+		return EARLY_EXIT;
 	// If we're called before the script has loaded, it is almost certainly by the ExitApp
 	// button on an error/warning dialog.  Treat it as a load-time error either way since
 	// that's probably what the user wants.
@@ -1768,12 +1770,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	if (g_IconSmall)
 		DestroyIcon(g_IconSmall), g_IconSmall = NULL;
 	DeleteCriticalSection(&g_Critical);
-
-	// PostQuitMessage() might be needed to prevent hang-on-exit.  Once this is done, no message boxes or
-	// other dialogs can be displayed.  MSDN: "The exit value returned to the system must be the wParam
-	// parameter of the WM_QUIT message."  In our case, PostQuitMessage() should announce the same exit code
-	// that we will eventually call exit() with:
-	PostQuitMessage(aExitCode);
 
 	// I know this isn't the preferred way to exit the program.  However, due to unusual
 	// conditions such as the script having MsgBoxes or other dialogs displayed on the screen
