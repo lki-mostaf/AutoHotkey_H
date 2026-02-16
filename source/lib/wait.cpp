@@ -355,7 +355,10 @@ ResultType RunWait(StrArg aTarget, optl<StrArg> aWorkingDir, optl<StrArg> aOptio
 		if (MsgWaitForMultipleObjects(1, &running_process, FALSE, INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0)
 			break;
 		if (g->Exited())
+		{
+			CloseHandle(running_process);
 			return EARLY_EXIT;
+		}
 		MsgSleepWithListLines(-1, waiting_line, start_time);
 	}
 

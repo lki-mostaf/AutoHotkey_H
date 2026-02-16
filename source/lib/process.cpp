@@ -133,7 +133,11 @@ static FResult ProcessWait(StrArg aProcess, optl<double> aTimeout, UINT &aRetVal
 					// matching processes are running.
 				case WAIT_OBJECT_0 + 1:
 					if (g->Exited())
+					{
+						if (proc)
+							CloseHandle(proc);
 						return FR_ABORTED;
+					}
 					MsgSleepWithListLines(-1, waiting_line, start_time);
 					continue;
 				case WAIT_TIMEOUT:
@@ -144,7 +148,11 @@ static FResult ProcessWait(StrArg aProcess, optl<double> aTimeout, UINT &aRetVal
 				// In case of failure, fall through:
 			}
 			if (g->Exited())
+			{
+				if (proc)
+					CloseHandle(proc);
 				return FR_ABORTED;
+			}
 			MsgSleepWithListLines(100, waiting_line, start_time);  // For performance reasons, don't check as often as the WinWait family does.
 		}
 		else // Done waiting.
@@ -210,8 +218,12 @@ bif_impl FResult Run(StrArg aTarget, optl<StrArg> aWorkingDir, optl<StrArg> aOpt
 	HANDLE hprocess;
 	auto result = g_script->ActionExec(aTarget, nullptr, aWorkingDir.value_or_null(), true
 		, aOptions.value_or_null(), &hprocess, true, true);
-	if (aOutPID && hprocess)
-		aOutPID->SetValue((UINT)GetProcessId(hprocess));
+	if (hprocess)
+	{
+		if (aOutPID)
+			aOutPID->SetValue((UINT)GetProcessId(hprocess));
+		CloseHandle(hprocess);
+	}
 	return result ? OK : FR_FAIL;
 }
 

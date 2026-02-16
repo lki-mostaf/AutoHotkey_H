@@ -550,13 +550,6 @@ void InitErrorBox(HWND hwnd, ErrorBoxParam &error)
 		SendMessage(re, EM_REPLACESEL, FALSE, (LPARAM)footer);
 	}
 
-	// ahk_h: Apply the default font to avoid font rollback
-	NONCLIENTMETRICS ncm{ sizeof(NONCLIENTMETRICS) };
-	SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &ncm, 0);
-	_tcscpy(cf.szFaceName, ncm.lfCaptionFont.lfFaceName);
-	cf.dwMask = CFM_FACE;
-	SendMessage(re, EM_SETCHARFORMAT, SCF_DEFAULT, (LPARAM)&cf);
-
 #ifdef CONFIG_DEBUGGER
 	LPCTSTR stack;
 	if (   error.stack_index >= 0
@@ -747,8 +740,7 @@ ResultType Script::ShowError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR 
 	}
 #endif
 
-	static auto sMod = LoadLibrary(_T("riched20.dll")); // RichEdit20W
-	//static auto sMod = LoadLibrary(_T("msftedit.dll")); // MSFTEDIT_CLASS (RICHEDIT50W)
+	static auto sMod = LoadLibrary(_T("msftedit.dll"));
 	ErrorBoxParam error;
 	error.text = aErrorText;
 	error.type = aErrorType;

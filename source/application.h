@@ -93,6 +93,7 @@ VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DW
 void InitMenuPopup(HMENU aMenu);
 void UninitMenuPopup(HMENU aMenu);
 bool MenuIsModeless(HMENU aMenu);
+void MenuSelectWorkaround(LPARAM lParam, WPARAM wParam);
 
 #ifndef CONFIG_DLL
 bool AHKModule();

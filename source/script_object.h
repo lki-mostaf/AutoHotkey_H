@@ -401,6 +401,8 @@ protected:
 	ResultType CallHiddenMethod(int aFlags, LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 	void CallNestedDelete();
 	ResultType NestedNew(ResultToken &aResultToken, StructInfo *si);
+	ResultType NestedSparseInit(ResultToken& aResultToken);
+	ResultType NestedSparseInit(ResultToken& aResultToken, TypedProperty& aProp, UINT_PTR aPtr);
 
 public:
 	bool IsUnsorted() { return mFlags & UnsortedFlag; }
@@ -527,7 +529,7 @@ public:
 	
 	Property *DefineProperty(name_t aName, bool aEnumerable = true);
 	TypedProperty *DefineTypedProperty(name_t aName);
-	FResult DefineTypedProperty(name_t aName, MdType aType, Object *aClass, size_t aCount);
+	FResult DefineTypedProperty(name_t aName, MdType aType, Object *aClass, size_t aCount, size_t aPack);
 	bool DefineMethod(name_t aName, IObject *aFunc);
 	void DefineClass(name_t aName, Object *aClass);
 	
@@ -1160,7 +1162,7 @@ public:
 	Var *mVar;
 	IObject *mFunc, *mComplete, *mError;
 	IStream *mStream[2]{ 0 };
-	ResultToken *mParamToken, **mParam, mResult;
+	ResultToken *mParamToken, **mParam, mResult{};
 	CRITICAL_SECTION mCritical;
 	HWND mReply;
 	int mParamCount, mPriority;

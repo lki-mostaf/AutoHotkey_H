@@ -2220,6 +2220,7 @@ public:
 	LineNumberType mCombinedLineNumber; // In the case of a continuation section/line(s), this is always the top line.
 
 	bool mClassPropertyStatic;
+	char mClassStructPack[MAX_NESTED_CLASSES + 1] {0};
 
 	#define UPDATE_TIP_FIELD tcslcpy(mNIC.szTip, mTrayIconTip ? mTrayIconTip \
 		: mFileName, _countof(mNIC.szTip));
@@ -2434,7 +2435,7 @@ public:
 	ResultType CloseCurrentModule();
 	ResultType ResolveImports();
 	ResultType ResolveImports(ScriptImport &aImport);
-	Var *AddNewImportVar(LPTSTR aVarName);
+	Var *AddNewImportVar(LPTSTR aVarName, Var *aAliasFor, IObject *aModule, bool aExport);
 	Var *FindImportedVar(LPCTSTR aVarName);
 
 	ResultType DerefInclude(LPTSTR &aOutput, LPCTSTR aBuf);

@@ -960,18 +960,13 @@ ResultType Object::GetTypedValue(ResultToken &aResultToken, int aFlags, TypedPro
 		Object *nested = mNested ? mNested[aProp.object_index] : nullptr;
 		if (!nested) // Since it wasn't constructed, this must be a pointer, not a real struct.
 		{
-			auto proto = dynamic_cast<Object*>(aProp.class_object->GetOwnPropObj(_T("Prototype")));
-			if (!proto)
-				return INVOKE_NOT_HANDLED;
-			nested = CreateStructPtr((UINT_PTR)ptr, proto, aResultToken);
-			if (!nested)
-				return FAIL; // Error was already raised.
+			auto result = NestedSparseInit(aResultToken, aProp, (UINT_PTR)ptr);
+			if (result != OK)
+				return result;
+			nested = mNested[aProp.object_index];
 		}
-		else
-		{
-			if (nested->AddRef() == 1) // First external reference.
-				this->AddRef(); // Keep this alive while nested is referenced externally.
-		}
+		if (nested->AddRef() == 1) // First external reference.
+			this->AddRef(); // Keep this alive while nested is referenced externally.
 		if (!(aFlags & IF_BYPASS___VALUE))
 		{
 			auto result = nested->Invoke(aResultToken, IT_GET | IF_BYPASS_METAFUNC, _T("__Value"), ExprTokenType(nested), nullptr, 0);
@@ -1002,7 +997,14 @@ ResultType Object::SetTypedValue(ResultToken &aResultToken, int aFlags, name_t a
 	auto ptr = (void*)(DataPtr() + aProp.data_offset);
 	if (aProp.class_object)
 	{
-		Object *nested = mNested[aProp.object_index];
+		Object* nested = mNested ? mNested[aProp.object_index] : nullptr;
+		if (!nested) // Since it wasn't constructed, this must be a pointer, not a real struct.
+		{
+			auto result = NestedSparseInit(aResultToken, aProp, (UINT_PTR)ptr);
+			if (result != OK)
+				return result;
+			nested = mNested[aProp.object_index];
+		}
 		mRefCount++; // Must be done at least when nested->mRefCount == 0 (and then reversed when nested->mRefCount reaches 0 again).
 		nested->mRefCount++; // Avoid calling Delete() when the __value setter returns.
 		auto param = &aValue;
@@ -1013,7 +1015,7 @@ ResultType Object::SetTypedValue(ResultToken &aResultToken, int aFlags, name_t a
 			return result;
 		return aResultToken.Error(_T("Assignment to struct is not supported."));
 	}
-	if (aProp.item_count)
+	if (aProp.item_count || aProp.class_object)
 		return aResultToken.Error(ERR_PROPERTY_READONLY, aName);
 	return SetValueOfTypeAtPtr(aProp.type, ptr, aValue, aResultToken);
 }
@@ -1782,7 +1784,7 @@ TypedProperty *Object::DefineTypedProperty(name_t aName)
 	return field->tprop;
 }
 
-FResult Object::DefineTypedProperty(name_t aName, MdType aType, Object *aClass, size_t aCount)
+FResult Object::DefineTypedProperty(name_t aName, MdType aType, Object *aClass, size_t aCount, size_t aPack)
 {
 	size_t psize = 0, palign = 0;
 	if (aClass)
@@ -1801,7 +1803,7 @@ FResult Object::DefineTypedProperty(name_t aName, MdType aType, Object *aClass, 
 		if (aType == MdType::Void)
 		{
 			psize = aCount;
-			palign = 1;
+			palign = aPack ? aPack : 1;
 		}
 	}
 	else
@@ -1823,7 +1825,9 @@ FResult Object::DefineTypedProperty(name_t aName, MdType aType, Object *aClass, 
 		aClass->AddRef();
 	}
 	tprop->item_count = aCount;
-	if (palign > si->align) // TODO: allow overriding struct packing
+	if (aPack && palign > aPack)
+		palign = aPack;
+	if (palign > si->align)
 		si->align = palign;
 	ASSERT(palign && ((palign & (palign - 1)) == 0)); // Must be a power of 2.
 	si->size = (si->size + palign - 1) & ~(palign - 1);
@@ -1933,7 +1937,8 @@ void Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 		Object *pclass = dynamic_cast<Object*>(TokenToObject(value));
 		MdType ptype = pclass ? MdType::Void : TypeCode(TokenToString(value));
 		size_t pcount = (ptype == MdType::Void) ? (size_t)TokenToInt64(value) : 0;
-		switch (DefineTypedProperty(name, ptype, pclass, pcount))
+		size_t pack = desc->GetOwnProp(value, _T("Pack")) ? (size_t)TokenToInt64(value) : 0;
+		switch (DefineTypedProperty(name, ptype, pclass, pcount, pack))
 		{
 		case OK:
 			AddRef();
@@ -2194,6 +2199,34 @@ ResultType Object::NestedNew(ResultToken &aResultToken, StructInfo *si)
 		Release();
 	}
 	return result;
+}
+
+ResultType Object::NestedSparseInit(ResultToken& aResultToken)
+{
+	if (mNested)
+		return OK;
+	auto si = GetStructInfo();
+	mNested = new (std::nothrow) Object * [si->nested_count + 1];
+	if (!mNested)
+		return aResultToken.MemoryError();
+	ZeroMemory(mNested, sizeof(Object*) * (si->nested_count + 1));
+	return OK;
+}
+
+ResultType Object::NestedSparseInit(ResultToken& aResultToken, TypedProperty& aProp, UINT_PTR aPtr)
+{
+	ASSERT(!mNested || !mNested[aProp.object_index]);
+	if (!NestedSparseInit(aResultToken))
+		return FAIL;
+	auto proto = dynamic_cast<Object*>(aProp.class_object->GetOwnPropObj(_T("Prototype")));
+	if (!proto)
+		return INVOKE_NOT_HANDLED;
+	auto nested = CreateStructPtr(aPtr, proto, aResultToken);
+	if (!nested)
+		return FAIL; // Error was already raised.
+	mNested[aProp.object_index] = nested;
+	nested->mRefCount--; // Nested object without external references should have mRefCount == 0.
+	return OK;
 }
 
 ResultType Object::Construct(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)

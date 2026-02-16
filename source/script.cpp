@@ -129,7 +129,7 @@ FuncEntry g_BIF[] =
 	BIFn(RegDelete, 0, 2, BIF_Reg),
 	BIFn(RegDeleteKey, 0, 1, BIF_Reg),
 	BIFn(RegRead, 0, 3, BIF_Reg),
-	BIFn(RegWrite, 0, 4, BIF_Reg),
+	BIFn(RegWrite, 1, 4, BIF_Reg),
 	BIF1(ResourceLoadLibrary, 1, 1),
 	BIF1(Round, 1, 2),
 	BIFn(RTrim, 1, 2, BIF_Trim),
@@ -459,9 +459,6 @@ void Script::DestroyWindows()
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
 	// and other cleanup being done:
-	KILL_DEREF_TIMER
-	KILL_INPUT_TIMER
-	KILL_MAIN_TIMER
 	DestroyWindow(g_hWnd);
 	g_hWnd = NULL;
 
@@ -503,12 +500,16 @@ void Script::DestroyWindows()
 		m->Release();
 		m = n;
 	}
+	mFirstMenu = mLastMenu = mTrayMenu = NULL;
 
 	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
 	for (i = 0; i < MAX_TOOLTIPS; ++i)
 		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
 			DestroyWindow(g_hWndToolTip[i]);
 	memset(g_hWndToolTip, 0, sizeof(g_hWndToolTip));
+
+	if (g_hAccelTable)
+		DestroyAcceleratorTable(g_hAccelTable), g_hAccelTable = NULL;
 }
 
 
@@ -519,11 +520,30 @@ Script::~Script() // Destructor.
 	if (g_FirstThreadID == g_MainThreadID)
 		TerminateSubThreads();
 
-	// reset count for OnMessage
-	g_MsgMonitor->Dispose();
-	mOnExit.Dispose();
-	mOnClipboardChange.Dispose();
+	if (!g_DestroyWindowCalled)
+		DestroyWindows();
 
+	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
+	// If there's any chance that a sound was played and not closed out, or that it is still playing,
+	// this check is done.  Otherwise, the check is avoided since it might be a high overhead call,
+	// especially if the sound subsystem part of the OS is currently swapped out or something:
+	if (g_SoundWasPlayed)
+	{
+		TCHAR buf[MAX_PATH * 2]; // See "MAX_PATH note" in Line::SoundPlay for comments.
+		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
+		if (*buf) // "playing" or "stopped"
+			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
+		g_SoundWasPlayed = 0;
+	}
+
+	if (g_MainWinClass)
+		UnregisterClass(g_WindowClassMain, g_hInstance), g_WindowClassMain = WINDOW_CLASS_MAIN, g_MainWinClass = 0;
+	if (g_GuiWinClass)
+		UnregisterClass(g_WindowClassGUI, g_hInstance), g_WindowClassGUI = WINDOW_CLASS_GUI, g_GuiWinClass = 0;
+
+	KILL_DEREF_TIMER
+	KILL_INPUT_TIMER
+	KILL_MAIN_TIMER
 	if (mFirstTimer) {
 		auto timer = mFirstTimer;
 		mFirstTimer = NULL;
@@ -532,6 +552,11 @@ Script::~Script() // Destructor.
 			delete t;
 		}
 	}
+
+	// reset count for OnMessage
+	g_MsgMonitor->Dispose();
+	mOnExit.Dispose();
+	mOnClipboardChange.Dispose();
 
 	// L31: Release objects stored in variables, where possible.
 	g->ExcptMode |= EXCPTMODE_DEBUGGER;
@@ -555,26 +580,6 @@ Script::~Script() // Destructor.
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 		mod->Clear();
 	free(mModules.mItem), mModules = {};
-
-	if (g_MainWinClass)
-		UnregisterClass(g_WindowClassMain, g_hInstance), g_WindowClassMain = WINDOW_CLASS_MAIN, g_MainWinClass = 0;
-	if (g_GuiWinClass)
-		UnregisterClass(g_WindowClassGUI, g_hInstance), g_WindowClassGUI = WINDOW_CLASS_GUI, g_GuiWinClass = 0;
-	if (g_hAccelTable)
-		DestroyAcceleratorTable(g_hAccelTable), g_hAccelTable = NULL;
-
-	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
-	// If there's any chance that a sound was played and not closed out, or that it is still playing,
-	// this check is done.  Otherwise, the check is avoided since it might be a high overhead call,
-	// especially if the sound subsystem part of the OS is currently swapped out or something:
-	if (g_SoundWasPlayed)
-	{
-		TCHAR buf[MAX_PATH * 2]; // See "MAX_PATH note" in Line::SoundPlay for comments.
-		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
-		if (*buf) // "playing" or "stopped"
-			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
-		g_SoundWasPlayed = 0;
-	}
 
 	IAhkApi::Finalize();
 
@@ -1330,7 +1335,7 @@ ResultType Script::AutoExecSection()
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 	{
 		result = ExecuteModule(mod);
-		if (result != OK)
+		if (result != OK && result != EARLY_RETURN)
 			break;
 	}
 
@@ -1657,7 +1662,6 @@ ResultType Script::ExitApp(ExitReasons aExitReason)
 
 
 
-#ifdef RELEASE_SOME_OBJECTS_ON_EXIT
 void ReleaseVarObjects(VarList &aVars)
 {
 	for (int v = 0; v < aVars.mCount; ++v)
@@ -1681,7 +1685,8 @@ void ReleaseStaticVarObjects(FuncList &aFuncs)
 		ReleaseVarObjects(f.mStaticVars);
 	}
 }
-#endif
+
+
 
 void TerminateSubThread(DWORD aThreadID, HWND aHwnd)
 {
@@ -1728,7 +1733,12 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	// Ensure the current thread is not paused and can't be interrupted
 	// in case one or more objects need to call a __delete meta-function.
 	g_AllowInterruption = FALSE;
-	g->IsPaused = false;
+	if (g->IsPaused == true)
+		g->IsPaused = false;
+
+	// for (auto mod = mLastModule; mod; mod = mod->mPrev)
+	// 	ReleaseVarObjects(mod->mVars);
+	// ReleaseStaticVarObjects(mFuncs);
 #ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
 	g_Debugger->DeleteBreakpoints();
 	g_Debugger->Exit(aExitReason);
@@ -2411,10 +2421,18 @@ process_completed_line:
 				case CONDITION_FALSE:
 					hotkey_flag = NULL; // It doesn't look like valid hotkey syntax, so parse it as something else (so the error message won't be ERR_INVALID_KEYNAME).
 					break;
-				//case CONDITION_TRUE:
+				case CONDITION_TRUE:
 					// It's a key that doesn't exist on the current keyboard layout.  Leave hotkey_flag set
 					// so that the section below handles it as a hotkey.  This ensures any same-line action
-					// or trailing block is interpreted correctly.  A warning will be displayed below.
+					// or trailing block is interpreted correctly.
+#ifndef AUTOHOTKEYSC
+					if (!mValidateThenExit) // Current keyboard layout is not relevant in /validate mode.
+#endif
+					{
+						TCHAR msg_text[128];
+						sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), static_cast<LPTSTR>(buf));
+						MsgBox(msg_text);
+					}
 				}
 				*cp = orig_char; // Undo the temp. termination above.
 			}
@@ -2536,7 +2554,8 @@ process_completed_line:
 					//    might be a mouse button or some longer key name whose actual/correct VK value is relied
 					//    upon by other places below.
 				{
-					auto result = ParseRemap(buf, remap_dest_vk, remap_name, hotkey_flag);
+					auto result = hotkey_validity == CONDITION_TRUE ? OK // Valid syntax but should have no effect.
+						: ParseRemap(buf, remap_dest_vk, remap_name, hotkey_flag);
 					if (!result)
 						return result;
 					if (result != CONDITION_FALSE)
@@ -2593,15 +2612,7 @@ process_completed_line:
 						if (hotkey_validity != CONDITION_TRUE)
 							return FAIL; // It already displayed the error.
 						// This hotkey uses a single-character key name, which could be valid on some other
-						// keyboard layout.  Allow the script to start, but warn the user about the problem.
-#ifndef AUTOHOTKEYSC
-						if (!mValidateThenExit) // Current keyboard layout is not relevant in /validate mode.
-#endif
-						{
-							TCHAR msg_text[128];
-							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), static_cast<LPTSTR>(buf));
-							MsgBox(msg_text);
-						}
+						// keyboard layout.  Allow the script to start, as the user has already been warned.
 					}
 				}
 				if (hook_action == HK_NORMAL && hk) // For simplicity, there's no detection of invalid stacking of "inactive" single-letter hotkeys (see above).
@@ -3958,6 +3969,10 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 			*aBuf = '\0';
 			return 0;
 		}
+		else if (*aBuf == '/' && aBuf[1] == '*')
+			// Avoid stripping ;comments since that would prevent detection of the comment-end
+			// in cases like "/* ; */".
+			return aBuf_length;
 	}
 	//else CONTINUATION_SECTION_WITH_COMMENTS (case #3 above), which due to other checking also means that
 	// this line isn't a comment (though it might have a comment on its right side, which is checked below).
@@ -4552,6 +4567,22 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (!parameter)
 			return ScriptError(ERR_PARAM1_REQUIRED);
 		return ParseModuleDirective(parameter);
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#StructPack")))
+	{
+		int i = parameter ? IsNumeric(parameter, FALSE, FALSE) ? ATOI(parameter) : -1 : 0;
+		switch (i)
+		{
+		case 0:
+		case 1:
+		case 2:
+		case 4:
+		case 8:
+			mClassStructPack[mClassObjectCount] = i;
+			return CONDITION_TRUE;
+		}
+		return ScriptError(ERR_PARAM1_INVALID, parameter);
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#DllImport")))
@@ -5398,10 +5429,10 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType)
 			}
 			if (*last_char == ')')
 			{
-				// Remove the parentheses (and possible open brace) and trailing space.
+				// Remove the parentheses (and possible open brace) and leading/trailing space.
 				ASSERT(action_args == end_marker);
-				++action_args;
-				last_char = omit_trailing_whitespace(end_marker, last_char - 1);
+				action_args = omit_leading_whitespace(end_marker + 1);
+				last_char = omit_trailing_whitespace(action_args, last_char - 1);
 				last_char[1] = '\0';
 				// Treat this like a function call: all parameters are sub-expressions.
 				all_args_are_expressions = true;
@@ -5784,7 +5815,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	case ACT_FINALLY:
 		bool expected = false;
 		Line *parent = mPendingRelatedLine;
-		if (parent->mActionType == ACT_BLOCK_BEGIN) // For mPendingRelatedLine, this means an entire block preceding this line.
+		if (parent && parent->mActionType == ACT_BLOCK_BEGIN) // For mPendingRelatedLine, this means an entire block preceding this line.
 			parent = parent->mParentLine;
 		for (;; parent = parent->mParentLine)
 		{
@@ -6860,6 +6891,7 @@ ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport)
 		return FAIL;
 	}
 	mClassObject[mClassObjectCount++] = class_object;
+	mClassStructPack[mClassObjectCount] = mClassStructPack[mClassObjectCount - 1];
 	// Define __Init unconditionally so that classes without static vars do not inherit __Init.
 	if (!DefineClassInit(true))
 		return FAIL;
@@ -7077,8 +7109,8 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 					TCHAR qu[2] { 0 };
 					if (TypeCode(type_name) != MdType::Void)
 						qu[0] = '\'';
-					_sntprintf(type_buf, _countof(type_buf), _T("this.Prototype.DefineProp('%s',{Type:%s%s%s})")
-						, item, qu, type_name, qu);
+					_sntprintf(type_buf, _countof(type_buf), _T("this.Prototype.DefineProp('%s',{Type:%s%s%s,Pack:%i})")
+						, item, qu, type_name, qu, mClassStructPack[mClassObjectCount]);
 					if (!DefineClassVarInit(type_buf, true, class_object, ACT_EXPRESSION))
 						return FAIL;
 					*type_name_end = type_end_char;
@@ -7376,8 +7408,9 @@ LPTSTR Script::FindLibraryFile(LPTSTR aFuncName, size_t aFuncNameLength, bool aI
 	// The legacy behaviour for #Include <A_B> is that all Libs are searched for A_B.ahk before
 	// searching for A.ahk, which means that A_B.ahk takes precedence over A.ahk even if A.ahk
 	// is defined in the local Lib and A_B.ahk is not.
-	if (auto first_underscore = _tcschr(aFuncName, '_'))
-		return FindLibraryFile(aFuncName, first_underscore - aFuncName);
+	for (i = 0; i < (int)aFuncNameLength; ++i)
+		if (aFuncName[i] == '_')
+			return FindLibraryFile(aFuncName, i);
 	return nullptr;
 }
 
@@ -7985,8 +8018,8 @@ Var *Script::FindUpVar(LPCTSTR aVarName, size_t aVarNameLength, UserFunc &aInner
 		return nullptr;
 	auto &outer = *aInner.mOuterFunc;
 	Var *outer_var;
-	if (  (outer_var = outer.mStaticVars.Find(aVarName)) || aInner.mIsStatic  )
-		return outer_var; // Can be nullptr if aInner.mIsStatic.
+	if (  (outer_var = outer.mStaticVars.Find(aVarName))  )
+		return outer_var;
 	if (  !(outer_var = outer.mVars.Find(aVarName))  )
 	{
 		if (  !(outer.mOuterFunc && (outer_var = FindUpVar(aVarName, aVarNameLength, outer, aDisplayError)))  )
@@ -7996,6 +8029,8 @@ Var *Script::FindUpVar(LPCTSTR aVarName, size_t aVarNameLength, UserFunc &aInner
 		if (!outer_var->IsNonStaticLocal())
 			return outer_var;
 	}
+	if (aInner.mIsStatic) // Function was declared static.
+		return nullptr; // "non-static local variables of the outer function are ignored"
 	// At this point, all var refs used in declarations, assignments or &var in the outer
 	// function should have already been parsed, while it's possible that some read-refs
 	// have not.  Ignore all variables that lack an assignment, &var or declaration.
