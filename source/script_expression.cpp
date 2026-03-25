@@ -191,7 +191,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			}
 			if (this_token.symbol == SYM_VAR && (!VARREF_IS_WRITE(this_token.var_usage) || this_token.var_usage == VARREF_LVALUE_MAYBE))
 			{
-				if (this_token.var->IsVirtual() && VARREF_IS_READ(this_token.var_usage))
+				if (this_token.var->IsVirtual() && (VARREF_IS_READ(this_token.var_usage) || this_token.var_usage == VARREF_ISSET))
 				{
 					// FUTURE: This should be merged with the SYM_FUNC handling at some point to improve
 					// maintainability, reduce code size, and take advantage of SYM_FUNC's optimizations.
@@ -210,7 +210,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 
 					if (result_token.symbol != SYM_STRING || result_token.marker_length == 0)
 					{
-						if (result_token.symbol == SYM_MISSING && this_token.var_usage != VARREF_READ_MAYBE)
+						if (result_token.symbol == SYM_MISSING && this_token.var_usage == VARREF_READ)
 						{
 							error_value = &this_token;
 							goto unset_var;
@@ -252,19 +252,22 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					this_token.SetValue(result, result_length);
 					goto push_this_token;
 				} // end if (reading a var of type VAR_VIRTUAL)
-				if (this_token.var->IsUninitialized())
+				if (this_token.var->IsUninitializedSelf() || this_token.var->IsUninitializedAliasFor())
 				{
-					if (this_token.var->Type() == VAR_CONSTANT)
+					if (this_token.var->CanSelfInitialize())
 					{
-						auto result = this_token.var->InitializeConstant();
+						auto result = this_token.var->SelfInitialize();
 						if (result != OK)
 						{
 							aResult = result;
 							result_to_return = NULL;
 							goto normal_end_skip_output_var;
 						}
+						if (!this_token.var->IsUninitializedAliasFor())
+							goto push_this_token;
+						// Otherwise, the module executed but the imported var is unset.
 					}
-					else if (this_token.var_usage == VARREF_READ)
+					if (this_token.var_usage == VARREF_READ)
 					{
 						// The expression is always aborted in this case, even if the user chooses to continue the thread.
 						// If this is changed, check all other callers of unset_var and VarUnsetError() for consistency.

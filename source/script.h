@@ -2127,11 +2127,12 @@ struct DerefList
 
 struct UnresolvedBaseClass
 {
+	UnresolvedBaseClass *next;
 	Object *subclass, *subclass_proto;
 	LPTSTR name;
-	FileIndexType file_index;
 	LineNumberType line_number;
-	UnresolvedBaseClass *next;
+	FileIndexType file_index;
+	bool is_struct;
 };
 
 
@@ -2180,18 +2181,16 @@ public:
 #define FDE_SUBSTITUTE_STRING L"(\u2026){}"
 #define FDE_SUBSTITUTE_STRING_LENGTH (_countof(FDE_SUBSTITUTE_STRING)-1)
 
-	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
-	Label *mLastLabel;  // The last defined label.
+	Line *mLastLine; // The last line added while parsing the current module.
 #ifdef CONFIG_DLL
 	int mLabelCount;
 #endif
 	FuncList mFuncs;
 
-	ScriptModuleList mModules;
 	ScriptModule mBuiltinModule { _T("AHK") };
 	ScriptModule mDefaultModule { _T("__Main") };
 	ScriptModule *mCurrentModule = &mBuiltinModule;
-	ScriptModule *mLastModule = nullptr;
+	ScriptModule *mLastModule = &mDefaultModule;
 	
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
 	Line *mLineParent = nullptr; // While loading the script, the parent line or block-begin for the next line to be added.
@@ -2211,6 +2210,7 @@ public:
 	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
 	Property *mClassProperty;
 	LPTSTR mClassPropertyDef;
+	Array *mSubClasses = Array::Create();
 
 	// These two track the file number and line number in that file of the line currently being loaded,
 	// which simplifies calls to ScriptError() and LineError() (reduces the number of params that must be passed).
@@ -2240,7 +2240,7 @@ public:
 		~LineBuffer() { free(p); }
 		operator LPTSTR() const { return p; }
 	};
-	size_t GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlockComment, TextStream *ts);
+	size_t GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aLiteralEscape, bool aInBlockComment, TextStream *ts);
 	ResultType GetLineContinuation(TextStream *ts, LineBuffer &aBuf, LineBuffer &aNextBuf
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
 	ResultType GetLineContExpr(TextStream *ts, LineBuffer &aBuf, LineBuffer &aNextBuf
@@ -2267,7 +2267,7 @@ public:
 	ResultType PreparseExpressions(FuncList &aFuncs);
 	void PreparseHotkeyIfExpr(Line *aLine);
 	ResultType PreparseCommands();
-	ResultType PreparseCommands(Line *aStartingLine);
+	ResultType PreparseCommands(ScriptModule *aModule);
 	ResultType PreparseCatchVar(Line *aLine);
 	ResultType PreparseCatchClass(Line *aLine);
 	bool IsLabelTarget(Line *aLine);
@@ -2386,7 +2386,7 @@ public:
 	void InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix);
 	LPTSTR FindLibraryFile(LPTSTR aName, size_t aNameLength, bool aIsModule = false);
 	LPCWSTR InitModuleSearchPath();
-	ResultType FindModuleFileIndex(LPCTSTR aName, FileIndexType &aFileIndex);
+	ResultType FindModuleFileIndex(LPCTSTR aName, FileIndexType &aFileIndex, FileIndexType aLocalFileIndex);
 #endif
 	IObject *GetBuiltinObject(LPCTSTR aName);
 	static Func *GetBuiltInFunc(LPCTSTR aFuncName);
@@ -2396,13 +2396,14 @@ public:
 	Var *AddFuncVar(UserFunc *aFunc);
 	UserFunc *AddFuncToList(UserFunc *aFunc);
 
-	ResultType DefineClass(LPTSTR aBuf, TCHAR aExport);
+	ResultType DefineClass(LPTSTR aBuf, TCHAR aExport, bool aStruct);
 	UserFunc *DefineClassInit(bool aStatic);
 	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
 	ResultType DefineClassVarInit(LPTSTR aBuf, bool aStatic, Object *aObject, ActionTypeType aActionType = ACT_INVALID);
 	ResultType DefineClassProperty(LPTSTR aBuf, bool aStatic, bool &aBufHasBraceOrNotNeeded);
 	ResultType DefineClassPropertyXet(LPTSTR aBuf, LPTSTR aEnd);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
+	bool ResolveBaseClass(LPCTSTR aClassName, bool aStruct, Object *&aClass, Object *&aProto);
 
 	static SymbolType ConvertWordOperator(LPCTSTR aWord, size_t aLength);
 	static bool EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker);
@@ -2430,11 +2431,14 @@ public:
 	VarList *GlobalVars() { return &CurrentModule()->mVars; }
 	
 	ScriptModule *CurrentModule() { return g->CurrentFunc ? g->CurrentFunc->mModule : mCurrentModule; }
+	ScriptModule *FindDirectiveModule(LPCTSTR aName, ScriptModule *aList);
 	ResultType ParseModuleDirective(LPCTSTR aName);
-	bool ParseImportStatement(LPTSTR aBuf);
+	ResultType ParseImportDirective(LPTSTR aBuf);
 	ResultType CloseCurrentModule();
-	ResultType ResolveImports();
-	ResultType ResolveImports(ScriptImport &aImport);
+	void ReopenModule(ScriptModule *aMod);
+	ScriptModule *CreateModule(LPCTSTR aName);
+	ResultType ResolveImports(ScriptModule *aTerminator = nullptr);
+	ResultType ResolveImports(ScriptImport &aImport, ScriptModule *aDirectiveList);
 	Var *AddNewImportVar(LPTSTR aVarName, Var *aAliasFor, IObject *aModule, bool aExport);
 	Var *FindImportedVar(LPCTSTR aVarName);
 
@@ -2694,11 +2698,14 @@ BIF_DECL(BIF_ObjPtr);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 BIF_DECL(BIF_ObjXXX);
 
-BIF_DECL(BIF_StructFromPtr);
+BIF_DECL(NewStruct);
+BIF_DECL(Struct_At);
+BIF_DECL(Struct_Item);
 
 BIF_DECL(BIF_Base);
 BIF_DECL(BIF_HasBase);
 BIF_DECL(BIF_HasProp);
+BIF_DECL(BIF_DefineProp);
 BIF_DECL(BIF_GetMethod);
 BIF_DECL(BIF_Props);
 

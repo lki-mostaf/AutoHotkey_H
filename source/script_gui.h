@@ -239,7 +239,6 @@ struct GuiControlType : public Object
 
 	thread_local static Object *sPrototype, *sPrototypeList;
 	thread_local static Object *sPrototypes[GUI_CONTROL_TYPE_COUNT];
-	thread_local static Object *sClasses[GUI_CONTROL_TYPE_COUNT];
 	static void DefineControlClasses();
 	static Object *GetPrototype(GuiControls aType);
 

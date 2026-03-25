@@ -64,6 +64,7 @@ FuncEntry g_BIF[] =
 	BIF1(ComObjValue, 1, 1),
 	BIF1(Cos, 1, 1),
 	BIF1(CryptAES, 2, 5),
+	BIF1(DefineProp, 3, 3),
 #ifdef ENABLE_DLLCALL
 	BIFn(DllCall, 1, NA, BIF_DllCall),
 	BIFn(DynaCall, 1, NA, BIF_DynaCall),
@@ -87,7 +88,7 @@ FuncEntry g_BIF[] =
 	BIFi(IsLower, 1, 2, BIF_IsTypeish, VAR_TYPE_LOWER),
 	BIFi(IsNumber, 1, 1, BIF_IsTypeish, VAR_TYPE_NUMBER),
 	BIF1(IsObject, 1, 1),
-	BIFi(IsSetRef, 1, 1, BIF_IsSet, 0, {1}),
+	BIFi(IsSetRef, 1, 1, BIF_IsSet, 1, {1}),
 	BIFi(IsSpace, 1, 1, BIF_IsTypeish, VAR_TYPE_SPACE),
 	BIFi(IsTime, 1, 1, BIF_IsTypeish, VAR_TYPE_TIME),
 	BIFi(IsUpper, 1, 2, BIF_IsTypeish, VAR_TYPE_UPPER),
@@ -149,14 +150,13 @@ FuncEntry g_BIF[] =
 	BIF1(StrPtr, 1, 1),
 	BIFn(StrPut, 1, 4, BIF_StrGetPut),
 	BIFn(StrTitle, 1, 1, BIF_StrCase),
-	BIF1(StructFromPtr, 2, 2),
 	BIFn(StrUpper, 1, 1, BIF_StrCase),
 	BIF1(SubStr, 2, 3),
 	BIF1(Swap, 2, 2,),
 	BIF1(Tan, 1, 1),
 	BIF1(Throw, 0, NA),
 	BIFn(Trim, 1, 2, BIF_Trim),
-	BIF1(Type, 1, 1),
+	BIF1(Type, 0, 1),
 	BIF1(UArray, 0, NA),
 	BIF1(UMap, 0, NA),
 	BIF1(UnZip, 2, 7),
@@ -355,11 +355,10 @@ VarEntry g_BIV_A[] =
 
 
 Script::Script()
-	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL)
+	: mLastLine(NULL), mCurrLine(NULL)
 	, mThisHotkeyName(_T("")), mPriorHotkeyName(_T("")), mThisHotkeyStartTime(0), mPriorHotkeyStartTime(0)
 	, mEndChar(0), mThisHotkeyModifiersLR(0)
 	, mOnClipboardChangeIsRunning(false)
-	, mLastLabel(NULL)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
 	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0)
 	, mNextLineIsFunctionBody(false)
@@ -564,7 +563,8 @@ Script::~Script() // Destructor.
 		if (cp->Callback)
 			cp->Callback->Release();
 
-	mDefaultModule.mPrev = &mBuiltinModule;
+	if (!mBuiltinModule.mPrev)
+		mDefaultModule.mPrev = &mBuiltinModule;
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 		mod->Free();
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
@@ -579,7 +579,6 @@ Script::~Script() // Destructor.
 
 	for (auto mod = mLastModule; mod; mod = mod->mPrev)
 		mod->Clear();
-	free(mModules.mItem), mModules = {};
 
 	IAhkApi::Finalize();
 
@@ -603,12 +602,9 @@ Script::~Script() // Destructor.
 	Free_Prototype(DynaToken::sPrototype);
 #endif
 	Free_Prototype(Promise::sPrototype);
+	mSubClasses->Release();
+	mSubClasses = nullptr;
 
-	for (int i = _countof(GuiControlType::sClasses) - 1; i; i--) {
-		if (!GuiControlType::sClasses[i])
-			continue;
-		Free_Prototype(GuiControlType::sClasses[i]);
-	}
 	memset(GuiControlType::sPrototypes, 0, sizeof(GuiControlType::sPrototypes));
 	GuiControlType::sPrototypeList = nullptr;
 	GuiControlType::sPrototype = nullptr;
@@ -653,6 +649,12 @@ Script::~Script() // Destructor.
 	Object::sNumberPrototype = nullptr;
 	Object::sIntegerPrototype = nullptr;
 	Object::sFloatPrototype = nullptr;
+	Object::sStructClass = nullptr;
+	Object::sStructPrototype = nullptr;
+	Object::sPtrClass = nullptr;
+	Object::sPtrPrototype = nullptr;
+	Object::sCArrayClass = nullptr;
+	Object::sCArrayPrototype = nullptr;
 #ifdef ENABLE_DECIMAL
 	Decimal::sPrototype = nullptr;
 #endif // ENABLE_DECIMAL
@@ -752,6 +754,7 @@ Script::~Script() // Destructor.
 	Line::sDerefBufSize = 0;
 	Line::sLargeDerefBufs = 0;
 	Line::sLogNext = 0;
+	TextStream::sLastStream = nullptr;
 
 	g_WorkingDir.Empty();
 	g_WorkingDirOrig = NULL;
@@ -892,9 +895,7 @@ ResultType Script::Init(LPTSTR aScriptFilename, IObject *aArgs)
 	// Up to this point, mCurrentModule == &mBuiltinModule for initialization of built-ins.
 	// From this point, declarations should add names to a script module, not mBuiltinModule.
 	mCurrentModule = &mDefaultModule;
-	mModules.Insert(&mDefaultModule, 0); // __Main
-	mModules.Insert(&mBuiltinModule, 1); // AHK
-	ASSERT(mModules.mCount == 2);
+	mDefaultModule.mSelfFileIndex = 0;
 
 	if (aArgs) // Caller-provided command-line args.
 	{
@@ -1367,14 +1368,10 @@ ResultType Script::ExecuteModule(ScriptModule *aModule)
 	if (!aModule->mFirstLine || aModule->mExecuted)
 		return OK;
 	aModule->mExecuted = true; // Set first to block recursion in cases where imp->mod imports aModule.
-	for (auto imp = aModule->mImports; imp; imp = imp->next)
-	{
-		auto result = ExecuteModule(imp->mod);
-		if (result != OK)
-			return result;
-	}
-	mCurrentModule = aModule;
-	return aModule->mFirstLine->ExecUntil(UNTIL_RETURN);
+	auto prev = std::exchange(mCurrentModule, aModule);
+	auto result = aModule->mFirstLine->ExecUntil(UNTIL_RETURN);
+	mCurrentModule = prev;
+	return result;
 }
 
 
@@ -1756,6 +1753,9 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	// destructed already).
 	DestroyWindows();
 
+	// Flush write buffers of any open File objects and other streams, such as Loop Read's OutputFile.
+	TextStream::FlushAllWriteBuffers();
+
 	delete g_script;
 	g_script = NULL;
 	delete g_clip;
@@ -1812,10 +1812,7 @@ UINT Script::LoadingFailed()
 			return LOADING_FAILED;
 	mCurrentModule->mPrev = mLastModule;
 	mLastModule = mCurrentModule;
-	mCurrentModule->mFirstLine = mFirstLine;
-	mFirstLine = nullptr;
 	mLastLine = nullptr;
-	mLastLabel = nullptr;
 	return LOADING_FAILED;
 }
 
@@ -1869,6 +1866,16 @@ UINT Script::LoadFromFile(LPCTSTR aFileSpec, LPCTSTR aScriptText)
 	if (!CloseCurrentModule() || !ResolveImports())
 		return LoadingFailed();
 
+	if (mBuiltinModule.mFirstLine && !mBuiltinModule.mPrev) // `#Module AHK` was used.
+	{
+		// Add AHK module last, so it will execute first.  Must be done before Preparse calls.
+		// Other modules use a flagged alias (Var::SetImport) for every imported name to trigger
+		// module execution on first reference, but that would be wasteful for the built-in
+		// module since built-in functions are usually called very often and early.
+		mBuiltinModule.mPrev = mLastModule;
+		mLastModule = &mBuiltinModule;
+	}
+
 	// Preparse all expressions and resolve all variable references.  The outer-most scope
 	// is preparsed first, then each function, working inward through all nested functions.
 	// All of a function's non-dynamic local variables are created before variable names
@@ -1918,10 +1925,11 @@ bool Script::IsFunctionDefinition(LPTSTR aBuf, LPTSTR aNextBuf)
 	LPTSTR action_start = aBuf;
 	LPTSTR action_end = find_identifier_end(aBuf);
 	bool is_default_export = false;
+	bool is_export = false;
 	if (IS_SPACE_OR_TAB(*action_end))
 	if (action_end - action_start == 6) // Allow modifier keywords.
 	{
-		bool is_export = !_tcsnicmp(aBuf, _T("Export"), 6);
+		is_export = !_tcsnicmp(aBuf, _T("Export"), 6);
 		if (is_export || !_tcsnicmp(aBuf, _T("Static"), 6))
 			action_start = omit_leading_whitespace(action_end);
 		if (is_default_export = is_export && !_tcsnicmp(action_start, _T("Default"), 7) && IS_SPACE_OR_TAB(action_start[7]))
@@ -1957,12 +1965,12 @@ bool Script::IsFunctionDefinition(LPTSTR aBuf, LPTSTR aNextBuf)
 	LPTSTR next_token = omit_leading_whitespace(param_end + 1);
 	return *next_token == 0 && *aNextBuf == '{' // Brace on next line.
 		|| *next_token == '{' && next_token[1] == 0 // Brace on same line.
-		|| *next_token == '=' && next_token[1] == '>'; // Fn() => expr
+		|| *next_token == '=' && next_token[1] == '>' && !is_export; // Fn() => expr
 }
 
 
 
-inline LPTSTR IsClassDefinition(LPTSTR aBuf, TCHAR *aExport)
+inline LPTSTR IsClassDefinition(LPTSTR aBuf, TCHAR *aExport, bool &aStruct)
 {
 	if (aExport) // Export is permitted.
 	{
@@ -1979,9 +1987,13 @@ inline LPTSTR IsClassDefinition(LPTSTR aBuf, TCHAR *aExport)
 				*aExport = 'E'; // Non-default export.
 		}
 	}
-	if (_tcsnicmp(aBuf, _T("Class"), 5) || !IS_SPACE_OR_TAB(aBuf[5])) // i.e. it's not "Class" followed by a space or tab.
+	if (aStruct = !_tcsnicmp(aBuf, _T("Struct"), 6) && IS_SPACE_OR_TAB(aBuf[6]))
+		aBuf += 7;
+	else if (!_tcsnicmp(aBuf, _T("Class"), 5) && IS_SPACE_OR_TAB(aBuf[5]))
+		aBuf += 6;
+	else
 		return NULL;
-	LPTSTR class_name = omit_leading_whitespace(aBuf + 6);
+	LPTSTR class_name = omit_leading_whitespace(aBuf);
 	if (_tcschr(EXPR_ALL_SYMBOLS, *class_name))
 		// It's probably something like "Class := GetClass()".
 		return NULL;
@@ -2288,6 +2300,8 @@ ResultType Script::LoadIncludedFile(TextStream *fp)
 
 	bool blocks_previously_open = mLineParent || mClassObjectCount; // For error detection.
 
+	auto module_previously_open = mCurrentModule;
+
 	LineBuffer buf, next_buf;
 	size_t &buf_length = buf.length, &next_buf_length = next_buf.length;
 
@@ -2397,23 +2411,21 @@ process_completed_line:
 		if (!hotstring_start) // Not a hotstring (hotstring_start is checked *again* in case above block changed it; otherwise hotkeys like ": & x" aren't recognized).
 		{
 			// Note that there may be an action following the HOTKEY_FLAG (on the same line).
-			if (hotkey_flag = _tcsstr(buf, HOTKEY_FLAG)) // Find the first one from the left, in case there's more than 1.
+			if (hotkey_flag = _tcsstr(buf + 1, HOTKEY_FLAG)) // Find the first one from the left, in case there's more than 1.
 			{
-				if (hotkey_flag == buf && hotkey_flag[2] == ':') // v1.0.46: Support ":::" to mean "colon is a hotkey".
-					++hotkey_flag;
-					// Above: Hotkeys like "^:::" and "l & :::" are not supported because: 1) some cases are
-					// ambiguous, such as "^:::" legitimately remapping caret to colon; 2) retaining support
-					// for colon as a remap target would require larger/more complicated code; 3) such hotkeys
-					// are hard for a human to read/interpret.
+				// Above: The search starts from + 1 to support ":::" to define colon as a hotkey.
+				// Hotkeys like "^:::" and "l & :::" are not supported because: 1) some cases are
+				// ambiguous, such as "^:::" legitimately remapping caret to colon; 2) retaining support
+				// for colon as a remap target would require larger/more complicated code; 3) such hotkeys
+				// are hard for a human to read/interpret.
 				// v1.0.40: It appears to be a hotkey, but validate it as such before committing to processing
 				// it as a hotkey.  If it fails validation as a hotkey, try to interpret it as a statement in
 				// case the double-colon is within a quoted string.
 				// Note: Hotstrings can't suffer from this type of ambiguity because a leading colon or pair of
 				// colons makes them easier to detect.
-				auto cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
-				TCHAR orig_char = *cp;
+				auto cp = hotkey_flag;
 				*cp = '\0'; // Temporarily terminate.
-				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL); // Passing NULL calls it in validate-only mode.
+				hotkey_validity = Hotkey::TextInterpret(buf, NULL); // Passing NULL calls it in validate-only mode.
 				switch (hotkey_validity)
 				{
 				case FAIL:
@@ -2434,7 +2446,7 @@ process_completed_line:
 						MsgBox(msg_text);
 					}
 				}
-				*cp = orig_char; // Undo the temp. termination above.
+				*cp = *HOTKEY_FLAG; // Undo the temp. termination above.
 			}
 		}
 
@@ -2693,7 +2705,8 @@ process_completed_line:
 		// Since above didn't "goto", it's not a label.
 		if (*buf == '#')
 		{
-			if (!_tcsnicmp(buf, _T("#HotIf"), 6) && IS_SPACE_OR_TAB(buf[6]))
+			if (!_tcsnicmp(buf, _T("#HotIf"), 6) && IS_SPACE_OR_TAB(buf[6])
+				|| !_tcsnicmp(buf, _T("#Import"), 7) && IS_SPACE_OR_TAB(buf[7]))
 			{
 				// Allow an expression enclosed in ()/[]/{} to span multiple lines:
 				if (!GetLineContExpr(fp, buf, next_buf, phys_line_number, has_continuation_section))
@@ -2840,15 +2853,19 @@ process_completed_line:
 
 		// Handle this first so that GetLineContExpr() doesn't need to detect it for OTB exclusion:
 		TCHAR class_export_type = 0;
-		if (LPTSTR class_name = IsClassDefinition(buf, mClassObjectCount ? nullptr : &class_export_type))
+		bool is_struct_class;
+		if (LPTSTR class_name = IsClassDefinition(buf, mClassObjectCount ? nullptr : &class_export_type, is_struct_class))
 		{
-			if (g->CurrentFunc)
-				return ScriptError(_T("Functions cannot contain classes."), buf);
-			if (!ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
+			if (ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
+			{
+				if (g->CurrentFunc)
+					return ScriptError(_T("Functions cannot contain classes."), buf);
+				if (!DefineClass(class_name, class_export_type, is_struct_class))
+					return FAIL;
+				goto continue_main_loop;
+			}
+			else if (!is_struct_class)
 				return ScriptError(ERR_MISSING_OPEN_BRACE, buf);
-			if (!DefineClass(class_name, class_export_type))
-				return FAIL;
-			goto continue_main_loop;
 		}
 
 		// Aside from goto/break/continue, anything not already handled above is either an expression
@@ -2928,10 +2945,6 @@ process_completed_line:
 				return FAIL;
 			goto continue_main_loop;
 		}
-		else if (!mLineParent && ParseImportStatement(buf))
-		{
-			goto continue_main_loop;
-		}
 
 		// Parse the command, assignment or expression, including any same-line open brace or sub-action
 		// for ELSE, TRY, CATCH or FINALLY.  Unlike braces at the start of a line (processed above), this
@@ -2982,7 +2995,9 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 		ScriptWarning(g_WarnMode, _T("Some non-ASCII characters could not be decoded.\n\nEnsure that the file is saved as UTF-8."));
 	}
 
-	++mCombinedLineNumber; // L40: Put the implicit ACT_EXIT on the line after the last physical line (for the debugger).
+	if (mCurrentModule != module_previously_open)
+		ReopenModule(module_previously_open);
+
 	return OK;
 }
 
@@ -3499,7 +3514,7 @@ ResultType Script::BalanceExprError(int aBalance, TCHAR aExpect[], LPTSTR aLineT
 ResultType Script::GetLineContinuation(TextStream *fp, LineBuffer &buf, LineBuffer &next_buf
 	, LineNumberType &phys_line_number, bool &has_continuation_section)
 {
-	bool do_rtrim, literal_escapes, literal_quotes;
+	bool do_rtrim, literal_escapes = false, literal_quotes;
 	#define CONTINUATION_SECTION_WITHOUT_COMMENTS 1 // MUST BE 1 because it's the default set by anything that's boolean-true.
 	#define CONTINUATION_SECTION_WITH_COMMENTS    2 // Zero means "not in a continuation section".
 	int in_continuation_section, indent_level;
@@ -3522,7 +3537,7 @@ ResultType Script::GetLineContinuation(TextStream *fp, LineBuffer &buf, LineBuff
 	{
 		// This increment relies on the fact that this loop always has at least one iteration:
 		++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
-		next_buf_length = GetLine(next_buf, in_continuation_section, in_comment_section, fp);
+		next_buf_length = GetLine(next_buf, in_continuation_section, literal_escapes, in_comment_section, fp);
 		if (!in_continuation_section)
 		{
 			// v2: The comment-end is allowed at the end of the line (vs. just the start) to reduce
@@ -3853,8 +3868,9 @@ ResultType Script::GetLineContinuation(TextStream *fp, LineBuffer &buf, LineBuff
 		}
 		else if (cp_length)
 		{
-			tmemcpy(buf + buf_length, cp, cp_length + 1); // Append this line to prev. and include the zero terminator.
+			tmemcpy(buf + buf_length, cp, cp_length); // Append this line to prev.
 			buf_length += cp_length; // Must be done only after the old value of buf_length was used above.
+			buf[buf_length] = '\0'; // Null-terminator isn't done by tmemcpy() because cp_length might have been adjusted to omit trailing whitespace.
 		}
 	} // for() each sub-line (continued line) that composes this line.
 	return OK;
@@ -3862,7 +3878,7 @@ ResultType Script::GetLineContinuation(TextStream *fp, LineBuffer &buf, LineBuff
 
 
 
-size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlockComment, TextStream *ts)
+size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aLiteralEscape, bool aInBlockComment, TextStream *ts)
 {
 	size_t aBuf_length = 0;
 	for (;;)
@@ -3998,7 +4014,7 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 			aBuf_length = rtrim_with_nbsp(aBuf, prevp - aBuf); // Since it's our responsibility to return a fully trimmed string.
 			break; // Once the first valid comment-flag is found, nothing after it can matter.
 		}
-		else // No whitespace to the left.
+		else if (!aLiteralEscape)
 		{
 			// The following is done here, at this early stage, to support escaping the comment flag in
 			// hotkeys and directives (the latter is mostly for backward-compatibility).
@@ -4562,11 +4578,20 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	if (IS_DIRECTIVE_MATCH(_T("#Module")))
 	{
-		if (mLineParent || mClassObjectCount)
+		if (mLineParent || mClassObjectCount || mPendingHotkey)
 			return ScriptError(ERR_UNEXPECTED_DIRECTIVE, aBuf);
 		if (!parameter)
 			return ScriptError(ERR_PARAM1_REQUIRED);
 		return ParseModuleDirective(parameter);
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#Import")))
+	{
+		if (mLineParent || mClassObjectCount)
+			return ScriptError(ERR_UNEXPECTED_DIRECTIVE, aBuf);
+		if (!ParseImportDirective(parameter))
+			return ScriptError(_T("Invalid import"), aBuf);
+		return CONDITION_TRUE;
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#StructPack")))
@@ -4843,7 +4868,7 @@ ResultType Script::AddLabel(LPTSTR aLabelName, bool aAllowDupe)
 	if (!*aLabelName)
 		return FAIL; // For now, silent failure because callers should check this beforehand.
 	Label *&first_label = g->CurrentFunc ? g->CurrentFunc->mFirstLabel : mCurrentModule->mFirstLabel;
-	Label *&last_label  = g->CurrentFunc ? g->CurrentFunc->mLastLabel  : mLastLabel;
+	Label *&last_label  = g->CurrentFunc ? g->CurrentFunc->mLastLabel  : mCurrentModule->mLastLabel;
 	if (!aAllowDupe && FindLabel(aLabelName))
 	{
 		// Don't attempt to dereference label->mJumpToLine because it might not
@@ -4908,10 +4933,22 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType)
 		// For v2, the interpretation of a control flow keyword shouldn't be affected by whatever
 		// operator follows it, so this is done before checking for assignments or other operators.
 		if (IS_SPACE_OR_TAB(*end_marker) || *end_marker == '(' || !*end_marker || *end_marker == '{')
+		{
 			aActionType = ConvertActionType(action_name);
-		if (*end_marker == '{' && !(aActionType == ACT_ELSE || aActionType == ACT_LOOP
-			|| aActionType == ACT_SWITCH || aActionType >= ACT_TRY && aActionType <= ACT_FINALLY))
-			aActionType = ACT_INVALID; // Not an action for which "xxx{" is valid.
+			if (!aActionType)
+			{
+				// For backward-compatibility with v2.0, this isn't recognized by ConvertActionType:
+				if (!_tcsicmp(action_name, _T("Export")) && !_tcsnicmp(action_args, _T("Global"), 6)
+					&& IS_SPACE_OR_TAB(action_args[6]))
+				{
+					aActionType = ACT_EXPORT;
+					action_args = omit_leading_whitespace(action_args + 7);
+				}
+			}
+			else if (*end_marker == '{' && !(aActionType == ACT_ELSE || aActionType == ACT_LOOP
+				|| aActionType == ACT_SWITCH || aActionType >= ACT_TRY && aActionType <= ACT_FINALLY))
+				aActionType = ACT_INVALID; // Not an action for which "xxx{" is valid.
+		}
 	}
 	else
 	{
@@ -5761,9 +5798,9 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	Line &line = *the_new_line;  // For performance and convenience.
 
 	line.mPrevLine = mLastLine;  // Whether NULL or not.
-	if (mFirstLine == NULL)
-		mFirstLine = the_new_line;
-	else
+	if (!mCurrentModule->mFirstLine)
+		mCurrentModule->mFirstLine = the_new_line;
+	if (mLastLine)
 		mLastLine->mNextLine = the_new_line;
 	// This must be done after the above:
 	mLastLine = the_new_line;
@@ -5917,7 +5954,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	// by searching only g->CurrentFunc, which has no labels in those cases.
 	//if (!mNoUpdateLabels)
 	{
-		for (Label *label = g->CurrentFunc ? g->CurrentFunc->mLastLabel : mLastLabel;
+		for (Label *label = g->CurrentFunc ? g->CurrentFunc->mLastLabel : mCurrentModule->mLastLabel;
 			label != NULL && label->mJumpToLine == NULL; label = label->mPrevLabel)
 		{
 			if (line.mActionType == ACT_ELSE || line.mActionType == ACT_UNTIL || line.mActionType == ACT_CATCH)
@@ -6778,13 +6815,15 @@ ResultType Script::DefineFunc(LPTSTR aBuf, bool aStatic, FuncDefType aIsInExpres
 
 
 
-ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport)
+ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport, bool aStruct)
 {
 	if (mClassObjectCount == MAX_NESTED_CLASSES)
 		return ScriptError(_T("This class definition is nested too deep."), aBuf);
 
 	LPTSTR cp, class_name = aBuf, base_class_name = nullptr;
-	Object *outer_class, *base_class = Object::sClass, *base_prototype = Object::sPrototype;
+	Object *outer_class;
+	Object *base_class = aStruct ? Object::sStructClass : Object::sClass;
+	Object *base_prototype = aStruct ? Object::sStructPrototype : Object::sPrototype;
 	Var *class_var;
 	ExprTokenType token;
 
@@ -6799,8 +6838,7 @@ ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport)
 		base_class_name = omit_leading_whitespace(cp + 8);
 		if (!*base_class_name)
 			return ScriptError(_T("Missing class name."), cp);
-		base_class = FindClass(base_class_name);
-		base_prototype = base_class ? (Object *)base_class->GetOwnPropObj(_T("Prototype")) : nullptr;
+		ResolveBaseClass(base_class_name, aStruct, base_class, base_prototype);
 	}
 
 	// Validate the name even if this is a nested definition, for consistency.
@@ -6864,6 +6902,7 @@ ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport)
 		// but it could be a class defined below this point, or a class defined in a module
 		// which hasn't been imported yet or has been imported but hasn't been resolved.
 		auto urc = new UnresolvedBaseClass;
+		urc->is_struct = aStruct;
 		urc->subclass = class_object;
 		urc->subclass_proto = prototype;
 		urc->name = _tcsdup(base_class_name);
@@ -6902,6 +6941,9 @@ ResultType Script::DefineClass(LPTSTR aBuf, TCHAR aExport)
 		if (!DefineClassVarInit(base_class_name, true, class_object, ACT_EXPRESSION))
 			return FAIL;
 	}
+
+	if (aStruct)
+		Object::CreatePtrClass(mClassName, class_object);
 
 	// This line enables a class without any static methods to be freed at program exit,
 	// or sooner if it's a nested class and the script removes it from the outer class.
@@ -7109,7 +7151,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 					TCHAR qu[2] { 0 };
 					if (TypeCode(type_name) != MdType::Void)
 						qu[0] = '\'';
-					_sntprintf(type_buf, _countof(type_buf), _T("this.Prototype.DefineProp('%s',{Type:%s%s%s,Pack:%i})")
+					_sntprintf(type_buf, _countof(type_buf), _T("DefineProp(this.Prototype,'%s',{Type:%s%s%s,Pack:%i})")
 						, item, qu, type_name, qu, mClassStructPack[mClassObjectCount]);
 					if (!DefineClassVarInit(type_buf, true, class_object, ACT_EXPRESSION))
 						return FAIL;
@@ -7314,6 +7356,21 @@ Object *Script::FindClass(LPCTSTR aClassName, size_t aClassNameLength)
 	}
 
 	return base_object;
+}
+
+
+bool Script::ResolveBaseClass(LPCTSTR aClassName, bool aStruct, Object *&aClass, Object *&aProto)
+{
+	auto c = FindClass(aClassName);
+	auto p = c ? (Object*)c->GetOwnPropObj(_T("Prototype")) : nullptr;
+	if (p && aStruct == (p->IsDerivedFrom(Object::sStructPrototype) || p == Object::sStructPrototype))
+	{
+		aClass = c;
+		aProto = p;
+		return true;
+	}
+	aClass = aProto = nullptr;
+	return false;
 }
 
 
@@ -8250,14 +8307,15 @@ Var *Script::FindGlobalVar2(LPCTSTR aVarName, bool aAdded)
 	auto mod = &mDefaultModule;
 	auto cp = _tcschr(aVarName, ':');
 	if (cp)
-		if (mod = mModules.Find(aVarName, cp - aVarName))
-			aVarName = ++cp;
-		else return nullptr;
+		// if (mod = mModules.Find(aVarName, cp - aVarName))
+		// 	aVarName = ++cp;
+		// else 
+		return nullptr;
 	int at;
 	auto var = mod->mVars.Find(aVarName, &at);
 	if (var)
 		return var;
-	if (var = mod->FindImportedVar(aVarName))
+	if (var = g_script->FindImportedVar(aVarName))
 		return var;
 	if (var = FindOrAddBuiltInVar(aVarName, !aAdded, nullptr))
 		return var;
@@ -8442,7 +8500,7 @@ ResultType Script::PreparseExpressions(FuncList &aFuncs)
 ResultType Script::PreparseCommands()
 {
 	for (mCurrentModule = mLastModule; mCurrentModule; mCurrentModule = mCurrentModule->mPrev)
-		if (!PreparseCommands(mCurrentModule->mFirstLine))
+		if (!PreparseCommands(mCurrentModule))
 			return FAIL;
 	mCurrentModule = &mDefaultModule; // Reset in case debugger queries properties prior to AutoExecSection().
 	return OK;
@@ -8450,12 +8508,23 @@ ResultType Script::PreparseCommands()
 
 
 
-ResultType Script::PreparseCommands(Line *aStartingLine)
+ResultType Script::PreparseCommands(ScriptModule *aModule)
 // Preparse any commands which might rely on blocks having been fully preparsed,
 // such as any command which has a jump target (label).
 // Also perform some late-stage optimizations and validation.
 {
-	for (Line *line = aStartingLine; line; line = line->mNextLine)
+	// Terminate each module with a Line so that all labels have a target and
+	// all control flow statements that need it have a non-null mRelatedLine.
+	if (aModule->mLastLine)
+	{
+		mPendingRelatedLine = aModule->mLastLine->mParentLine;
+		mCombinedLineNumber = aModule->mLastLine->mLineNumber + 1; // +1 to distinguish it from the last executable line when debugging.
+		mCurrFileIndex = aModule->mLastLine->mFileIndex;
+	}
+	if (!AddLine(ACT_EXIT))
+		return FAIL;
+
+	for (Line *line = aModule->mFirstLine; line; line = line->mNextLine)
 	{
 		LPTSTR line_raw_arg1 = LINE_RAW_ARG1; // Resolve only once to help reduce code size.
 		LPTSTR line_raw_arg2 = LINE_RAW_ARG2; //
@@ -8766,7 +8835,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 // IsSet is constructed here because it's a sort of intrinsic function with its own
 // special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
 // or a name (which is displayed when the parameter count is invalid, for instance).
-static BuiltInFunc sIsSetFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
+static BuiltInFunc sIsSetFunc{ _T("IsSet"), BIF_IsSet, 0, 1 };
 ResultType Line::ExpressionToPostfix(ArgStruct &aArg, ExprTokenType *&aInfix)
 // Returns OK or FAIL.
 {
@@ -9525,14 +9594,14 @@ unquoted_literal:
 				if (this_deref_ref.type == DT_QSTRING)
 				{
 					cp = omit_leading_whitespace(cp + 1);
-					if (*cp && _tcschr(_T("+-*&~!"), *cp) && cp[1] != '=' && (cp[1] != '&' || *cp != '&'))
+					if (*cp && _tcschr(_T("+-*&~!"), *cp) && cp[1] != '=' && (cp[1] != '&' || *cp != '&') && cp[1] != '~')
 					{
 						// The symbol following this literal string is either a unary operator or a
 						// binary operator which can't (at least logically) be applied to a literal
 						// string. Since the user's intention isn't clear, treat it as a syntax error.
 						// The most common cases where this helps are:
-						//	MsgBox % "var's address is " &var  ; Misinterpreted as SYM_BITAND.
-						//	MsgBox % "counter is now " ++var   ; Misinterpreted as SYM_POST_INCREMENT.
+						//	MsgBox "var's address is " &var  ; Misinterpreted as SYM_BITAND.
+						//	MsgBox "counter is now " ++var   ; Misinterpreted as SYM_POST_INCREMENT.
 						return LineError(_T("Unexpected operator following literal string."), FAIL, cp);
 					}
 				}
@@ -9978,12 +10047,20 @@ unquoted_literal:
 				// !x  ; Supported even if X contains a negative number, since x is recognized as an isolated operand and not something containing unary minus.
 				//
 
+				sym_prev = this_infix > infix ? this_infix[-1].symbol : SYM_INVALID;
+
+				if (infix_symbol == SYM_HIGHNOT && this_infix[1].symbol == SYM_REGEXMATCH) // v2.1: !~=
+				{
+					++this_infix;
+					infix_symbol = SYM_REGEXMATCH;
+				}
+				
+				sym_next = this_infix[1].symbol; // It will be SYM_INVALID if there are no more.
+
 				// Perform some rough checks to detect most syntax errors.  This is done after the
 				// precedence check so that it isn't done multiple times for a single token when
 				// the stack contains one or more higher-precedence operators, and also so that
 				// the left operand (if this is a binary operator) has been popped into postfix.
-				sym_prev = this_infix > infix ? this_infix[-1].symbol : SYM_INVALID;
-				sym_next = this_infix[1].symbol; // It will be SYM_INVALID if there are no more.
 				SymbolType sym_postfix = postfix_count ? postfix[postfix_count-1]->symbol : SYM_INVALID;
 				if (IS_ASSIGNMENT_OR_POST_OP(infix_symbol))
 				{
@@ -10221,7 +10298,8 @@ standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 			}
 			else if ((this_postfix->callsite->flags & IT_BITMASK) == IT_CALL)
 			{
-				if (this_postfix->callsite->param_count == 1 && this_postfix->callsite->func == &sIsSetFunc)
+				if (this_postfix->callsite->param_count == 1 && this_postfix->callsite->func == &sIsSetFunc
+					&& !(this_postfix->callsite->flags & EIF_ISSET_UNSET))
 				{
 					auto &last_postfix = *postfix[postfix_count - 1];
 					if (last_postfix.symbol == SYM_VAR || last_postfix.symbol == SYM_DYNAMIC)
@@ -10238,14 +10316,19 @@ standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 							break;
 						}
 					}
-					return LineError(_T("IsSet requires a variable."), FAIL, this_postfix->error_reporting_marker);
+					if (last_postfix.symbol != SYM_MISSING)
+						return LineError(_T("IsSet requires a variable or unset expression."), FAIL, this_postfix->error_reporting_marker);
 				}
 			}
 			break;
 
 		case SYM_REGEXMATCH: // a ~= b  ->  RegExMatch(a, b)
+		{
 			this_postfix->symbol = SYM_FUNC;
+			if ((this_postfix-1)->symbol == SYM_HIGHNOT) // !~=
+				postfix[++postfix_count] = this_postfix-1; // It was skipped before, so insert it straight into postfix.
 			break;
+		}
 
 		case SYM_AND:
 		case SYM_OR:
@@ -10315,7 +10398,12 @@ standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 			if (IS_CPAREN_LIKE(infix_symbol) || infix_symbol == SYM_COMMA)
 			{
 				if (stack_symbol == SYM_FUNC && this_postfix < chain_end)
-					return LineError(_T("This unset expression requires a final \"?\" or \"??\"."), FAIL, this_postfix->error_reporting_marker);
+				{
+					if ((**stk).callsite->func == &sIsSetFunc)
+						(**stk).callsite->flags |= EIF_ISSET_UNSET;
+					else
+						return LineError(_T("This unset expression requires a final \"?\" or \"??\"."), FAIL, this_postfix->error_reporting_marker);
+				}
 			}
 			else if (infix_symbol == SYM_OR_MAYBE || infix_symbol == SYM_MAYBE) // SYM_MAYBE is right-associative, so found in infix_symbol only due to parentheses; e.g. ((a?.b)?)
 			{
@@ -13349,15 +13437,16 @@ ResultType Script::PreparseVarRefs()
 		if (!PreparseVarRefs(mCurrentModule->mFirstLine))
 			return FAIL;
 
+		mCurrLine = nullptr;
 		while (auto *unc = mCurrentModule->mUnresolvedBaseClass)
 		{
-			Object *proto, *cls = FindClass(unc->name);
-			if (!cls || !(proto = (Object*)cls->GetOwnPropObj(_T("Prototype"))))
+			Object *proto, *cls;
+			if (!ResolveBaseClass(unc->name, unc->is_struct, cls, proto)
+				|| cls == unc->subclass || cls->IsDerivedFrom(unc->subclass))
 			{
-				mCurrLine = NULL;
 				mCurrFileIndex = unc->file_index;
 				mCombinedLineNumber = unc->line_number;
-				return ScriptError(_T("Unknown class."), unc->name);
+				return ScriptError(_T("Invalid base class."), unc->name);
 			}
 			unc->subclass->SetBase(cls);
 			unc->subclass_proto->SetBase(proto);

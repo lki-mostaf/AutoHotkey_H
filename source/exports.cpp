@@ -231,7 +231,7 @@ struct ScriptSnapshot
 	ScriptSnapshot(bool aDetach): mHeap(aDetach)
 	{
 		g->CurrentFunc = nullptr;
-		g_script->mLastModule = nullptr;
+		g_script->mLastModule = mModule;
 		g_script->mCurrentModule = mModule;
 		mModule->mImports = mImport;
 		mImport->next = *mCurrentModuleImportEndPtr;
@@ -286,11 +286,7 @@ struct ScriptSnapshot
 			if (hc->Callback)
 				hc->Callback->Release();
 		for (auto mod = g_script->mLastModule; mod; mod = mod->mPrev)
-		{
-			if (mod->mName)
-				g_script->mModules.Remove(mod->mName);
 			mod->Clear();
-		}
 		mVars.~VarListBackup();
 		mHeap.DeleteAfter(mHeap.mFirst2);
 		g_script->mCurrentModule = mCurrentModule;

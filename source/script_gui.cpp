@@ -773,7 +773,6 @@ ObjectMemberMd GuiControlType::sMembersCB[] =
 thread_local Object *GuiControlType::sPrototype;
 thread_local Object *GuiControlType::sPrototypeList;
 thread_local Object *GuiControlType::sPrototypes[GUI_CONTROL_TYPE_COUNT];
-thread_local Object *GuiControlType::sClasses[GUI_CONTROL_TYPE_COUNT];
 
 void GuiControlType::DefineControlClasses()
 {
@@ -818,10 +817,7 @@ void GuiControlType::DefineControlClasses()
 		auto cls = CreateClass(sPrototypes[i]);
 		cls->SetBase(base_class);
 		gui_class->DefineClass(sTypeNames[i], cls);
-		sClasses[i] = cls;
 	}
-	sClasses[GUI_CONTROL_TAB2] = list_class;
-	sClasses[GUI_CONTROL_TAB3] = ctrl_class;
 }
 
 Object *GuiControlType::GetPrototype(GuiControls aType)

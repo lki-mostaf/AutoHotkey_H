@@ -252,6 +252,7 @@ struct TypedProperty
 {
 	MdType type;
 	Object *class_object;
+	Object *pointed_proto;
 	size_t data_offset;
 	size_t object_index;
 	size_t item_count;
@@ -266,7 +267,9 @@ struct TypedProperty
 //#define ObjParseIntKey(s, endptr) Exp32or64(UorA(wcstol,strtol),UorA(_wcstoi64,_strtoi64))(s, endptr, 10) // Convert string to IntKeyType, setting errno = ERANGE if overflow occurs.
 #define ObjParseIntKey(s, endptr) UorA(_wcstoi64,_strtoi64)(s, endptr, 10) // Convert string to IntKeyType, setting errno = ERANGE if overflow occurs.
 
+struct DYNAPARM;
 class Array;
+class Map;
 
 class Object : public ObjectBase
 {
@@ -325,6 +328,12 @@ protected:
 		size_t size;
 		size_t align;
 		size_t nested_count;
+		size_t item_count; // Separate from nested_count for simplicity maintainability (since arrays of numbers have no nested objects).
+		Object *pointed_class;
+		Map *array_class_map;
+		MdType native_type;
+		UCHAR dllcall_type;
+		bool is_unsigned;
 	};
 
 	enum EnumeratorType
@@ -349,7 +358,8 @@ protected:
 		DataIsStructInfo = 0x10,
 		StructInfoLocked = 0x20,
 		NoCallDelete = 0x40,
-		LastObjectFlag = 0x40
+		CannotOwnProps = 0x80,
+		LastObjectFlag = 0x80
 	};
 
 	Object *CloneTo(Object &aTo);
@@ -392,7 +402,9 @@ protected:
 	Object *GetThisForTypedValue(ResultToken &aResultToken, int aFlags, name_t aName, ExprTokenType &aThisToken);
 	ResultType GetTypedValue(ResultToken &aResultToken, int aFlags, TypedProperty &aProp);
 	ResultType SetTypedValue(ResultToken &aResultToken, int aFlags, name_t aName, TypedProperty &aProp, ExprTokenType &aValue);
-	
+	ResultType GetBoxedPointer(ResultToken &aResultToken, UINT_PTR aPtr, Object *aPrototype, size_t aCacheIndex);
+	ResultType SetBoxedPointer(ResultToken &aResultToken, ExprTokenType &aValue, UINT_PTR &aPtr, Object *aPrototype, size_t aCacheIndex, Object *aPointerClass);
+
 	ResultType CallEtter(ResultToken &aResultToken, int aFlags, IObject *aEtter, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType CallAsMethod(ExprTokenType &aFunc, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 	
@@ -403,6 +415,7 @@ protected:
 	ResultType NestedNew(ResultToken &aResultToken, StructInfo *si);
 	ResultType NestedSparseInit(ResultToken& aResultToken);
 	ResultType NestedSparseInit(ResultToken& aResultToken, TypedProperty& aProp, UINT_PTR aPtr);
+	ResultType CArrayNew(ResultToken &aResultToken, StructInfo *si);
 
 public:
 	bool IsUnsorted() { return mFlags & UnsortedFlag; }
@@ -410,6 +423,7 @@ public:
 
 	static Object *Create();
 	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr, bool aUnsorted = false);
+	static Object *CreateStruct();
 	static Object *CreateStructPtr(UINT_PTR aPtr, Object *aBase, ResultToken &aResultToken);
 	
 	static ResultType ApplyParams(ResultToken &aThisResultToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -531,8 +545,11 @@ public:
 	TypedProperty *DefineTypedProperty(name_t aName);
 	FResult DefineTypedProperty(name_t aName, MdType aType, Object *aClass, size_t aCount, size_t aPack);
 	bool DefineMethod(name_t aName, IObject *aFunc);
-	void DefineClass(name_t aName, Object *aClass);
+	void DefineClass(name_t aName, Object *aClass, bool aIsStructPtrClass = false);
 	
+	static void CreatePtrClass(LPTSTR aClassName, Object *aClass, StructInfo *aNative = nullptr);
+	static void CreateCArrayClass(ResultToken &aResultToken, ExprTokenType &aOfClass, size_t aCount);
+
 	bool CanSetBase(Object *aNewBase);
 	ResultType SetBase(Object *aNewBase, ResultToken &aResultToken);
 	void SetBase(Object *aNewBase)
@@ -557,6 +574,8 @@ public:
 	bool IsOfType(Object *aPrototype) override;
 	bool IsDerivedFrom(IObject *aBase); // Always false for non-Object objects, but IObject* allows dynamic_cast to be avoided.
 
+	Object *ClassGetPrototype();
+
 	void EndClassDefinition();
 	void RemoveMissingProperties();
 	
@@ -567,6 +586,9 @@ public:
 	static ObjectMember sErrorMembers[], sOSErrorMembers[];
 	thread_local static Object *sPrototype, *sClass, *sClassPrototype;
 	thread_local static IObject *sObjectCall;
+	
+	static ObjectMember sStructMembers[], sCArrayMembers[];
+	thread_local static Object *sStructClass, *sStructPrototype, *sPtrClass, *sPtrPrototype, *sCArrayClass, *sCArrayPrototype;
 
 	static void CreateRootPrototypes();
 	static Object *CreateClass(Object *aPrototype, Object *aBase = Object::sClassPrototype);
@@ -594,6 +616,8 @@ public:
 	UINT_PTR DataSize() { return (mFlags & DataIsAllocatedFlag) ? *(UINT_PTR*)mData : 0; }
 	UINT_PTR StructSize() { return (mFlags & DataIsStructInfo) ? ((StructInfo*)mData)->size : mBase ? mBase->StructSize() : 0; }
 	UINT_PTR LockStructSize() { auto si = GetStructInfo(); return si ? si->size : 0; }
+	
+	bool GetStructArgInfo(DYNAPARM &aType, Object *&aPointedClass);
 
 	// Methods and functions:
 	void DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -608,6 +632,11 @@ public:
 	enum { M_Error__New, M_OSError__New };
 	void Error__New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	void Error_Show(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+	enum { M_Struct_Ptr, M_Struct_Size, M_CArray_Length };
+	void StructGet(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void StructPtrInvoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void CArrayItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	// For pseudo-objects:
 	thread_local static Object *sAnyPrototype, *sPrimitivePrototype, *sStringPrototype
