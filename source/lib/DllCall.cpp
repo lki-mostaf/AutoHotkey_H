@@ -434,14 +434,15 @@ bool Object::GetStructArgInfo(DYNAPARM &aType, Object *&aPointedClass)
 			aType.is_unsigned = si->is_unsigned;
 			aType.passed_by_address = si->pointed_class != nullptr;
 			aPointedClass = nullptr;
+			return true;
 		}
 		else if (si->size)
 		{
 			aType.type = DLL_ARG_STRUCT;
 			aType.struct_size = si->item_count ? -1 : (int)si->size;
 			aPointedClass = si->pointed_class;
+			return true;
 		}
-		return true;
 	}
 	return false;
 }
@@ -762,7 +763,7 @@ has_valid_return_type:
 
 	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
 	dyna_param = arg_count ? (DYNAPARM *)_alloca(arg_count * sizeof(DYNAPARM)) : NULL;
-	if (arg_count) memcpy(dyna_param, ((DYNAPARM *)dt->mData) + 1, arg_count * sizeof(DYNAPARM));
+	if (arg_count && dt) memcpy(dyna_param, ((DYNAPARM *)dt->mData) + 1, arg_count * sizeof(DYNAPARM));
 	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
 	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
 	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,

@@ -140,7 +140,7 @@ bif_impl FResult TrayTip(optl<StrArg> aText, optl<StrArg> aTitle, optl<StrArg> a
 /////////////////
 
 void callFuncDll(FuncAndToken &aFuncAndToken, bool throwerr);
-UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address);
+UINT64 CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address);
 LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
 	// Detect Explorer crashes so that tray icon can be recreated.  I think this only works on Win98
@@ -558,7 +558,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	}
 
 	case AHK_CALLBACK:
-		return RegisterCallbackCStub((UINT_PTR *)wParam, (char *)lParam);
+		return (UINT_PTR)RegisterCallbackCStub((UINT_PTR *)wParam, (char *)lParam);
 
 	case WM_ENTERMENULOOP:
 		CheckMenuItem(GetMenu(g_hWnd), ID_FILE_PAUSE, g->IsPaused ? MF_CHECKED : MF_UNCHECKED); // This is the menu bar in the main window; the tray menu's checkmark is updated only when the tray menu is actually displayed.

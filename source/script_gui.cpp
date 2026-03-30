@@ -784,6 +784,10 @@ void GuiControlType::DefineControlClasses()
 	auto list_class = CreateClass(sPrototypeList, ctrl_class);
 	gui_class->DefineClass(_T("Control"), ctrl_class);
 	gui_class->DefineClass(_T("List"), list_class);
+	g_script->mSubClasses->Append(ExprTokenType{ ctrl_class });
+	g_script->mSubClasses->Append(ExprTokenType{ list_class });
+	ctrl_class->Release();
+	list_class->Release();
 
 	for (int i = GUI_CONTROL_INVALID + 1; i < GUI_CONTROL_TYPE_COUNT; ++i)
 	{
@@ -817,6 +821,8 @@ void GuiControlType::DefineControlClasses()
 		auto cls = CreateClass(sPrototypes[i]);
 		cls->SetBase(base_class);
 		gui_class->DefineClass(sTypeNames[i], cls);
+		g_script->mSubClasses->Append(ExprTokenType{ cls });
+		cls->Release();
 	}
 }
 
