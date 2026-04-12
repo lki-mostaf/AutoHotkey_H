@@ -1769,7 +1769,6 @@ Object *Object::CreatePtrClass(Object *sc, Object *sp, StructInfo *spsi)
 		si->dllcall_type = spsi->dllcall_type;
 		si->is_unsigned = spsi->is_unsigned;
 	}
-	ptr_pro->mFlags &= ~NativeClassPrototype;
 	// ahk_h: Has been released in CreateClass
 	// ptr_pro->Release();
 	_freea(buf);
@@ -4577,6 +4576,11 @@ ObjectMember Object::sStructMembers[]
 	Object_Member(Size, StructGet, M_Struct_Size, IT_GET)
 };
 
+ObjectMember Object::sPtrMembers[]
+{
+	Object_Member(__Value, StructPtrInvoke, 0, IT_SET)
+};
+
 ObjectMember Object::sCArrayMembers[]
 {
 	Object_Member(__Item, CArrayItem, 0, IT_SET, 1, 1),
@@ -4803,9 +4807,10 @@ void Object::CreateRootPrototypes()
 	prop->NoEnumGet = true;
 	prop->NoParamGet = true;
 
-	sPtrPrototype = CreatePrototype(_T("Struct") STRUCT_PTR_CLASS_SUFFIX, sStructPrototype);
+	sPtrPrototype = CreatePrototype(_T("Struct") STRUCT_PTR_CLASS_SUFFIX, sStructPrototype, sPtrMembers, _countof(sPtrMembers));
 	sPtrClass = CreateClass(sPtrPrototype, sStructClass);
 	{
+		sPtrPrototype->mFlags &= ~NativeClassPrototype; // Allow Struct.Call to construct Ptr.
 		auto &tp = *sPtrPrototype->DefineTypedProperty(_T("Value"));
 		tp.type = MdType::IntPtr;
 		tp.class_object = nullptr;
@@ -4817,11 +4822,6 @@ void Object::CreateRootPrototypes()
 		psi.pointed_class = sStructClass; // This is not a counted reference.
 		auto &ssi = *sStructPrototype->GetStructInfo(true);
 		ssi.pointer_class = sPtrClass;
-		ObjectMember members[]{
-			Object_Member(__Value, StructPtrInvoke, 0, IT_SET)
-		};
-		DefineMembers(sPtrPrototype, _T("Struct.Ptr"), members, _countof(members));
-		sPtrPrototype->mFlags &= ~NativeClassPrototype;
 	}
 
 	sCArrayPrototype = CreatePrototype(_T("Struct.Array"), sStructPrototype);

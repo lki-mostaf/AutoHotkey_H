@@ -589,7 +589,7 @@ public:
 	thread_local static Object *sPrototype, *sClass, *sClassPrototype;
 	thread_local static IObject *sObjectCall;
 	
-	static ObjectMember sStructMembers[], sCArrayMembers[];
+	static ObjectMember sStructMembers[], sPtrMembers[], sCArrayMembers[];
 	thread_local static Object *sStructClass, *sStructPrototype, *sPtrClass, *sPtrPrototype, *sCArrayClass, *sCArrayPrototype;
 	thread_local static Object *sPrimitiveClass[(int)MdType::LastSupportedPropertyType];
 

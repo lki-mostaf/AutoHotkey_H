@@ -3134,10 +3134,9 @@ ResultType Script::ParseRemap(LPCTSTR aSource, vk_type remap_dest_vk, LPCTSTR aD
 				*next_blind_mod++ = mod_string[i*2+1]; // One of ^!+#
 			}
 	*next_blind_mod = '\0';
-	LPTSTR extra_event = _T(""); // Set default.
 	cp += _stprintf(cp
-		, _T("Send(\"{Blind%s}%s%s{%s%s}\")") // DownR vs. Down. See Send's DownR handler for details.
-		, blind_mods, extra_event, remap_dest_modifiers, remap_dest, remap_wheel ? _T("") : _T(" DownR"));
+		, _T("Send(\"{Blind%s}%s{%s%s}\")") // DownR vs. Down. See Send's DownR handler for details.
+		, blind_mods, remap_dest_modifiers, remap_dest, remap_wheel ? _T("") : _T(" DownR"));
 
 	auto define_remap_func = [&]()
 		{
@@ -5308,7 +5307,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType)
 		{
 		case ACT_STATIC: declare_type = VAR_DECLARE_STATIC; break;
 		case ACT_LOCAL: declare_type = VAR_DECLARE_LOCAL; break;
-		case ACT_EXPORT: declare_type = VAR_GLOBAL | VAR_EXPORTED; break;
+		case ACT_EXPORT: declare_type = VAR_DECLARE_GLOBAL | VAR_EXPORTED; break;
 		default: declare_type = VAR_DECLARE_GLOBAL; break;
 		}
 
@@ -5392,15 +5391,16 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType)
 				//  - Declaring a built-in variable as local or static.
 				// But permit the following:
 				//  - Exact duplicate declarations, such as for two different code paths.
-				if (var->Scope() != declare_type)
+				//  - Declarations which differ only by the presence of "Export".
+				if ((var->Scope() & ~VAR_EXPORTED) != (declare_type & ~VAR_EXPORTED))
 					return ConflictingDeclarationError(Var::DeclarationType(declare_type), var);
 			}
 			else
 			{
 				var = global_var;
-				if (declare_type & VAR_EXPORTED)
-					var->Scope() |= VAR_EXPORTED; // Mightn't be set if var was already defined.
 			}
+			if (declare_type & VAR_EXPORTED)
+				var->Scope() |= VAR_EXPORTED; // Mightn't be set if var was already defined.
 
 			item_end = omit_leading_whitespace(item_end); // Move up to the next comma, assignment-op, or '\0'.
 			if (*item_end && *item_end != ',')
@@ -13432,6 +13432,8 @@ ResultType Script::PreparseVarRefs()
 {
 	for (mCurrentModule = mLastModule; mCurrentModule; mCurrentModule = mCurrentModule->mPrev)
 	{
+		ResolveIndirectImports();
+
 		if (!PreparseVarRefs(mCurrentModule->mFirstLine))
 			return FAIL;
 
