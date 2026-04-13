@@ -274,9 +274,7 @@ BIF_DECL(StructClass_At)
 	auto ptr = (UINT_PTR)ParamIndexToInt64(1);
 	if (ptr < 65536)
 		return (void)aResultToken.ParamError(0, aParam[1]);
-	auto obj = Object::CreateStructPtr(ptr, proto, aResultToken);
-	if (obj)
-		_f_return(obj);
+	_f_return(Object::CreateStructPtr(proto, ptr));
 }
 
 
@@ -294,23 +292,8 @@ bif_impl FResult ObjSetDataPtr(IObject *aObj, UINT_PTR aPtr)
 
 void Object::SetDataPtr(UINT_PTR aPtr)
 {
-	if (mFlags & DataIsAllocatedFlag)
-		free(mData);
 	mData = (void*)aPtr;
-	mFlags = (mFlags & ~(DataIsAllocatedFlag | DataIsStructInfo)) | DataIsSetFlag;
-	if (!mNested)
-		return;
-	for (auto base = mBase; base; base = base->mBase)
-	{
-		if (!(base->mFlags & DataIsStructInfo))
-			continue;
-		for (index_t i = 0; i < base->mFields.Length(); ++i)
-		{
-			auto &field = base->mFields[i];
-			if (field.symbol == SYM_TYPED_FIELD && field.tprop->class_object)
-				mNested[field.tprop->object_index]->SetDataPtr(aPtr + field.tprop->data_offset);
-		}
-	}
+	mFlags |= DataIsSetFlag;
 }
 
 
@@ -330,61 +313,14 @@ FResult Object::GetDataPtr(UINT_PTR &aPtr)
 }
 
 
-#ifdef ENABLE_OBJALLOCDATA
-bif_impl FResult ObjAllocData(IObject *aObj, UINT_PTR aSize)
-{
-	if (!aObj->IsOfType(Object::sPrototype))
-		return FR_E_ARG(0);
-	return ((Object*)aObj)->AllocDataPtr(aSize);
-}
-#endif
-
-FResult Object::AllocDataPtr(UINT_PTR aSize)
-{
-	auto p = (UINT_PTR*)malloc(sizeof(UINT_PTR) + aSize);
-	if (!p)
-		return FR_E_OUTOFMEM;
-	if (mFlags & DataIsAllocatedFlag)
-		free(mData);
-	*p = aSize;
-	mData = p;
-	mFlags = DataIsAllocatedFlag | DataIsSetFlag | (mFlags & ~DataIsStructInfo);
-	return OK;
-}
-
-
 bif_impl FResult ObjGetDataSize(IObject *aObj, UINT_PTR &aRetVal)
 {
 	if (!aObj->IsOfType(Object::sPrototype))
 		return FR_E_ARG(0);
-	aRetVal = ((Object*)aObj)->DataSize();
-	if (!aRetVal)
-		aRetVal = ((Object*)aObj)->StructSize();
+	aRetVal = ((Object*)aObj)->StructSize();
 	return OK;
 }
 
-
-#ifdef ENABLE_OBJALLOCDATA
-bif_impl FResult ObjFreeData(IObject *aObj)
-{
-	if (!aObj->IsOfType(Object::sPrototype))
-		return FR_E_ARG(0);
-	return ((Object*)aObj)->FreeDataPtr();
-}
-
-FResult Object::FreeDataPtr()
-{
-	if ((mFlags & (DataIsAllocatedFlag | DataIsSetFlag)) == (DataIsAllocatedFlag | DataIsSetFlag))
-	{
-		free(mData);
-		mData = nullptr;
-		mFlags &= ~(DataIsAllocatedFlag | DataIsSetFlag);
-	}
-	else if (mData)
-		return FR_E_FAILED;
-	return OK;
-}
-#endif
 
 BIF_DECL(BIF_UArray)
 {

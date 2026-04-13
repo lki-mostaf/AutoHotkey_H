@@ -51,7 +51,8 @@ public:
 	class Prototype : public Object
 	{
 	public:
-		size_t mSize = 0;
+		StructInfo mInfo{};
+		size_t mSuffixSize;
 		void (*OnDispose)() = nullptr;
 		~Prototype();
 		virtual Object* New(ExprTokenType* aParam[], int aParamCount);

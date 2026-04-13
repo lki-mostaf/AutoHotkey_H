@@ -176,7 +176,7 @@ struct ResultToken : public ExprTokenType
 #ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
 	IObject* named_params;
 #endif
-	BuiltInFunc* func;
+	void *callee_id;
 
 	bool Exited()
 	{
@@ -276,22 +276,32 @@ public:
 		name_t name;
 	};
 
-	enum EnumeratorType
-	{
-		Enum_Properties,
-		Enum_Methods
-	};
-
 	enum Flags : decltype(mFlags)
 	{
 		UnsortedFlag = 0x80000000,
 		ClassPrototype = 0x01,
 		NativeClassPrototype = 0x02,
 		DataIsSetFlag = 0x04,
-		DataIsAllocatedFlag = 0x08,
-		DataIsStructInfo = 0x10,
+		//unused = 0x08,
+		StructInfoInitialized = 0x10,
 		StructInfoLocked = 0x20,
-		LastObjectFlag = 0x20
+		NoCallDelete = 0x40,
+		CannotOwnProps = 0x80,
+		LastObjectFlag = 0x80
+	};
+
+	struct StructInfo
+	{
+		size_t size;
+		size_t align;
+		size_t nested_count;
+		size_t item_count; // Separate from nested_count for simplicity maintainability (since arrays of numbers have no nested objects).
+		Object *pointed_class;
+		Object *pointer_class;
+		Map *array_class_map;
+		MdType native_type;
+		UCHAR dllcall_type;
+		bool is_unsigned;
 	};
 
 	Object* mBase = nullptr;
@@ -452,8 +462,9 @@ enum class MdType : UINT8
 	UInt32		= 6,
 	Int64		= 7,
 	UInt64		= 8,
-	Float64		= 9,
-	Float32		= 10,
+	IntPtr		= 9,
+	Float64		= 10,
+	Float32		= 11,
 	String,
 	Object,
 	Variant, // Currently only for input (ExprTokenType) or retval (ResultToken).
@@ -461,6 +472,7 @@ enum class MdType : UINT8
 	ResultType,
 	FResult,
 	//NzIntWin32, // BOOL result where FALSE means failure and GetLastError() is applicable.
+	Struct,
 	Params,
 #ifdef ENABLE_MD_BITS
 	BitsBase	= 99, // For encoding a small literal value to insert into the parameter list.
@@ -481,7 +493,7 @@ enum class MdType : UINT8
 	FirstModifier = Optional,
 	BitsUpperBound = Optional,
 	UIntPtr = Exp32or64(UInt32, UInt64),
-	IntPtr = Exp32or64(Int32, Int64)
+	LastSupportedPropertyType = Float32
 };
 class MdFunc : public NativeFunc
 {
@@ -556,7 +568,8 @@ public:
 	class Prototype : public Object
 	{
 	public:
-		size_t mSize = 0;
+		StructInfo mInfo{};
+		size_t mSuffixSize;
 		void (*OnDispose)() = nullptr;
 		~Prototype();
 		virtual Object *New(ExprTokenType *aParam[], int aParamCount);

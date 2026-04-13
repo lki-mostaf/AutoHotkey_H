@@ -28,7 +28,7 @@ GNU General Public License for more details.
 struct RCArgType
 {
 	MdType type;
-	Object *cls, *proto;
+	Object *proto;
 };
 
 
@@ -194,7 +194,7 @@ UINT64 CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used b
 					// For struct parameters of sizes other than those below, x64 passes them by address.
 					auto p = (ss < 3 || ss == 4 || ss == 8) ? (UINT_PTR)next_param : *next_param;
 #endif
-					auto obj = Object::CreateStructPtr(p, arg_type[param_count].proto, result_token, true);
+					auto obj = Object::CreateStructCopyNoDelete(arg_type[param_count].proto, p);
 					if (!obj)
 					{
 						aborted = true;
@@ -268,12 +268,11 @@ UINT64 CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used b
 				else
 				{
 					FuncResult fr;
-					ExprTokenType cls_t(ret.cls), *prm = &cls_t;
-					obj = Object::Create();
-					auto result = obj->New(fr, &prm, 1);
+					obj = Object::CreateStruct(ret.proto);
+					auto result = obj->Initialize(fr, nullptr, 0);
 					if (result == OK)
 					{
-						prm = &result_token;
+						ExprTokenType *prm = &result_token;
 						// New has set fr.object=obj but has not called AddRef, so don't call Free.
 						fr.symbol = SYM_STRING;
 						fr.marker = _T("");
@@ -286,14 +285,14 @@ UINT64 CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used b
 							TypeError(classname ? classname : _T("Struct"), fr);
 						}
 					}
+					//else an error was already raised.  Copy obj's data anyway (possibly all zeroes),
+					// rather than leaving the return value undefined.
 				}
-				//else CreateStructPtr already reported the error.
-				if (obj)
-				{
-					// Copy returned struct by value into the caller-provided space.
-					// obj can be a derived struct class, in which case it must be truncated.
-					memcpy(ret_ptr, (void*)((Object*)result_obj)->DataPtr(), ret.proto->StructSize());
-				}
+				// Copy returned struct by value into the caller-provided space.
+				// obj can be a derived struct class, in which case it must be truncated.
+				memcpy(ret_ptr, (void*)obj->DataPtr(), ret.proto->StructSize());
+				if (obj != result_obj)
+					obj->Release();
 			}
 			else
 				SetValueOfTypeAtPtr(ret_type, ret_ptr, result_token, result_token);
@@ -416,7 +415,6 @@ bif_impl FResult CallbackCreate(IObject *func, optl<StrArg> aOptions, ExprTokenT
 			param_types->ItemToToken(i, v);
 			at[i].type = TypeCode(TokenToString(v));
 			at[i].proto = nullptr;
-			at[i].cls = nullptr;
 			if (at[i].type == MdType::Void)
 			{
 				if (v.symbol == SYM_OBJECT && v.object->IsOfType(Object::sPrototype))
@@ -425,14 +423,12 @@ bif_impl FResult CallbackCreate(IObject *func, optl<StrArg> aOptions, ExprTokenT
 					auto proto = cls->ClassGetPrototype();
 					if (proto && proto->IsDerivedFrom(Object::sStructPrototype))
 					{
-						at[i].type = ((Object*)proto)->GetStructMdType();
+						at[i].type = proto->GetStructMdType();
 						if (at[i].type == MdType::Void)
 						{
 							at[i].type = MdType::Struct;
 							at[i].proto = (Object*)proto;
 						}
-						if (i == actual_param_count) // Only the return type needs a reference to the Class.
-							at[i].cls = cls;
 						continue;
 					}
 				}
@@ -443,8 +439,6 @@ bif_impl FResult CallbackCreate(IObject *func, optl<StrArg> aOptions, ExprTokenT
 		for (UINT i = 0; i < param_types->Length(); ++i)
 			if (at[i].proto)
 				at[i].proto->AddRef();
-		if (at[actual_param_count].cls)
-			at[actual_param_count].cls->AddRef();
 	}
 
 #ifdef WIN32_PLATFORM
@@ -533,8 +527,6 @@ bif_impl FResult CallbackFree(UINT_PTR aCallback)
 		for (int i = 0; i <= callbackfunc->actual_param_count; ++i)
 			if (at[i].proto)
 				at[i].proto->Release();
-		if (at[callbackfunc->actual_param_count].cls)
-			at[callbackfunc->actual_param_count].cls->Release();
 	}
 	GlobalFree(callbackfunc);
 	return OK;

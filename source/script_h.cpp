@@ -730,7 +730,7 @@ ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
 	else return Object::Invoke(IObject_Invoke_PARAMS);
 
 	aResultToken.SetValue(this);
-	aResultToken.func = nullptr;
+	aResultToken.callee_id = (void *)(UINT_PTR)FID_DynaCall;
 	BIF_DllCall(aResultToken, aParam, aParamCount);
 	return aResultToken.Result();
 }

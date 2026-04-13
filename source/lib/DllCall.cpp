@@ -426,25 +426,23 @@ int ConvertDllArgTypes(LPTSTR& aBuf, DYNAPARM *aDynaParam, int aParamCount)
 
 bool Object::GetStructArgInfo(DYNAPARM &aType, Object *&aPointedClass)
 {
-	if (auto si = GetStructInfo())
+	auto &si = *GetStructInfo(true);
+	if (!si.size)
+		return false;
+	if (si.dllcall_type)
 	{
-		if (si->dllcall_type)
-		{
-			aType.type = (DllArgTypes)si->dllcall_type;
-			aType.is_unsigned = si->is_unsigned;
-			aType.passed_by_address = si->pointed_class != nullptr;
-			aPointedClass = nullptr;
-			return true;
-		}
-		else if (si->size)
-		{
-			aType.type = DLL_ARG_STRUCT;
-			aType.struct_size = si->item_count ? -1 : (int)si->size;
-			aPointedClass = si->pointed_class;
-			return true;
-		}
+		aType.type = (DllArgTypes)si.dllcall_type;
+		aType.is_unsigned = si.is_unsigned;
+		aType.passed_by_address = si.pointed_class != nullptr;
+		aPointedClass = nullptr;
 	}
-	return false;
+	else
+	{
+		aType.type = DLL_ARG_STRUCT;
+		aType.struct_size = si.item_count ? -1 : (int)si.size;
+		aPointedClass = si.pointed_class;
+	}
+	return true;
 }
 
 
@@ -561,7 +559,7 @@ BIF_DECL(BIF_DllCall)
 	LPTSTR function_name = NULL;
 	void *function = NULL; // Will hold the address of the function to be called.
 	int vf_index = -1; // Set default: not ComCall.
-	int aID = aResultToken.func ? _f_callee_id : FID_DynaCall, *param_shift = nullptr;
+	int aID = _f_callee_id, *param_shift = nullptr;
 	DynaToken* dt = aID == FID_DynaCall ? (DynaToken*)aResultToken.object : nullptr;
 
 	if (aID == FID_ComCall)
@@ -751,11 +749,10 @@ has_valid_return_type:
 	{
 		aResultToken.symbol = SYM_STRING; // Set default for Invoke.
 		aResultToken.marker = _T("");
-		NewStruct(aResultToken, aParam + aParamCount, 1);
-		if (aResultToken.Exited())
-			return; // New releases obj on failure.
+		if (Object::CreateStruct(aResultToken, return_proto) != OK)
+			return; // Initialize releases obj on failure.
 		ASSERT(aResultToken.symbol == SYM_OBJECT);
-		auto obj = aResultToken.object;
+		auto obj = (Object*)aResultToken.object;
 		return_struct_ptr = (void*)((Object*)obj)->DataPtr();
 		pObj[nObj++] = obj;
 		aResultToken.symbol = SYM_INTEGER; // Ensure it is not SYM_OBJECT, for maintainability (in case of early exit due to an error).
@@ -951,12 +948,10 @@ has_valid_return_type:
 			{
 				aResultToken.symbol = SYM_STRING; // Set default for Invoke.
 				aResultToken.marker = _T("");
-				ExprTokenType t = param_class, *pt = &t; // Can't use aParam[i] directly since param_class might have been overridden.
-				NewStruct(aResultToken, &pt, 1);
-				if (aResultToken.Exited())
-					return; // New releases obj on failure.
+				if (Object::CreateStruct(aResultToken, param_proto) != OK)
+					return; // Initialize releases obj on failure.
 				ASSERT(aResultToken.symbol == SYM_OBJECT);
-				auto obj = aResultToken.object;
+				auto obj = (Object*)aResultToken.object;
 				pObj[nObj++] = this_param_obj = obj;
 				if (aParam[i]->symbol != SYM_VAR || !aParam[i]->var->IsUninitialized()) // It's not &var, or var has a value.
 				{
@@ -964,10 +959,8 @@ has_valid_return_type:
 					aResultToken.marker = _T("");
 					auto result = obj->Invoke(aResultToken, IT_SET | IF_BYPASS_METAFUNC | IF_NO_NEW_PROPS
 						, _T("__Value"), ExprTokenType(obj), aParam + i, 1);
-					if (result == INVOKE_NOT_HANDLED)
+					if (result == INVOKE_NOT_HANDLED && this_param.symbol != SYM_MISSING)
 					{
-						if (this_param.symbol == SYM_MISSING)
-							_f_throw(ERR_PARAM_REQUIRED);
 						auto classname = param_proto->GetOwnPropString(_T("__Class"));
 						_f_throw_type(classname ? classname : _T("Object"), *aParam[i]);
 					}

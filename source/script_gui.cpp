@@ -796,7 +796,7 @@ void GuiControlType::DefineControlClasses()
 
 		// Determine base prototype and control-type-specific members.
 		Object *base_proto = sPrototype, *base_class = ctrl_class;
-		ObjectMemberListType more_items;
+		ObjectMemberMd *more_items = nullptr;
 		int how_many = 0;
 		switch (i)
 		{
@@ -818,8 +818,7 @@ void GuiControlType::DefineControlClasses()
 		TCHAR buf[32];
 		_sntprintf(buf, 32, _T("Gui.%s"), sTypeNames[i]);
 		sPrototypes[i] = CreatePrototype(buf, base_proto, more_items, how_many);
-		auto cls = CreateClass(sPrototypes[i]);
-		cls->SetBase(base_class);
+		auto cls = CreateClass(sPrototypes[i], base_class);
 		gui_class->DefineClass(sTypeNames[i], cls);
 		g_script->mSubClasses->Append(ExprTokenType{ cls });
 		cls->Release();

@@ -570,14 +570,18 @@ thread_local int IAhkApi::sInit = 0;
 IAhkApi::Prototype::~Prototype() { if (OnDispose) OnDispose(); }
 
 Object* IAhkApi::Prototype::New(ExprTokenType* aParam[], int aParamCount) {
-	auto size = max(mSize, sizeof(Object));
-	auto obj = new (malloc(size)) Object;
-	if (!obj) return nullptr;
+	auto &si = *GetStructInfo(true);
+	auto size = mSuffixSize + si.size;
+	Object *obj = new (size) Object;
+	if (!obj)
+		return nullptr;
+	if (size)
+		ZeroMemory(obj + 1, size);
+	if (si.size)
+		obj->SetDataPtr((UINT_PTR)(obj + 1) + mSuffixSize);
 	obj->SetBase(this);
-	if (size -= sizeof(Object))
-		memset((char*)obj + sizeof(Object), 0, size);
 	FuncResult result;
-	return obj->Construct(result, aParam, aParamCount) == OK ? obj : nullptr;
+	return obj->Initialize(result, aParam, aParamCount) == OK ? obj : nullptr;
 }
 
 void EarlyAppInit();
@@ -793,15 +797,23 @@ Func* STDMETHODCALLTYPE IAhkApi::Method_New(LPTSTR aFullName, ObjectMember& aMem
 
 Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, size_t aClassSize, ObjectMember aMember[], int aMemberCount, Prototype*& aPrototype, Object* aBase) {
 	static BuiltInFunctionType obj_ctor = [](BIF_DECL_PARAMS) {
-		auto proto = static_cast<Prototype*>(aResultToken.func->mData);
-		auto size = max(proto->mSize, sizeof(Object));
-		Object* obj = new (malloc(size)) Object;
+		auto base = static_cast<Prototype*>(aResultToken.callee_id);
+		IObject *cls = aParamCount ? TokenToObject(*aParam[0]) : nullptr;
+		IObject *prt = cls && cls->IsOfType(Object::sPrototype) ? ((Object *)cls)->GetOwnPropObj(_T("Prototype")) : nullptr;
+		Object *proto = prt && prt->IsOfType(Object::sPrototype) ? (Object *)prt : nullptr;
+		if (proto != base && (!proto || !proto->IsDerivedFrom(base)))
+			_f_throw_value(ERR_INVALID_BASE);
+		auto &si = *proto->GetStructInfo(true);
+		auto size = base->mSuffixSize + si.size;
+		Object* obj = new (size) Object;
 		if (!obj)
-			_f_throw_oom;
-		if (size -= sizeof(Object))
-			memset((char*)obj + sizeof(Object), 0, size);
+			return;
+		if (size)
+			ZeroMemory(obj + 1, size);
+		if (si.size)
+			obj->SetDataPtr((UINT_PTR)(obj + 1) + base->mSuffixSize);
 		obj->SetBase(proto);
-		obj->New(aResultToken, aParam, aParamCount);
+		obj->Initialize(aResultToken, aParam + 1, aParamCount - 1);
 	};
 	TCHAR full_name[MAX_VAR_NAME_LENGTH + 1];
 	Prototype* proto = nullptr;
@@ -810,7 +822,7 @@ Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, size_t aClassSiz
 		aPrototype->SetBase(aBase ? aBase : Object::sPrototype);
 		aPrototype->mFlags |= Object::ClassPrototype | Object::NativeClassPrototype;
 		aPrototype->SetOwnProp(_T("__Class"), ExprTokenType(aClassName));
-		aPrototype->mSize = aClassSize;
+		aPrototype->mSuffixSize = aClassSize > sizeof(Object) ? aClassSize - sizeof(Object) : 0;
 
 		TCHAR* name = full_name + _stprintf(full_name, _T("%s.Prototype."), aClassName);
 		for (int i = 0; i < aMemberCount; ++i)
