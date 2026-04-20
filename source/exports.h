@@ -52,10 +52,11 @@ public:
 	{
 	public:
 		StructInfo mInfo{};
-		size_t mSuffixSize;
 		void (*OnDispose)() = nullptr;
+		UINT mExtraObjectSize = 0;
 		~Prototype();
 		virtual Object* New(ExprTokenType* aParam[], int aParamCount);
+		ResultType CallNew(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, Object *aBase, StructInfo *si);
 	};
 
 	// IUnknown
@@ -89,7 +90,7 @@ public:
 	virtual Func* STDMETHODCALLTYPE Func_New(FuncEntry& aBIF);
 	virtual Func* STDMETHODCALLTYPE Method_New(LPTSTR aFullName, ObjectMember& aMember, Object* aPrototype);
 	// `aPrototype` does not need to be released, `obj->IsOfType(aPrototype)` is used to check the object type
-	virtual Object* STDMETHODCALLTYPE Class_New(LPTSTR aClassName, size_t aClassSize, ObjectMember aMembers[], int aMemberCount, Prototype*& aPrototype, Object* aBase = nullptr);
+	virtual Object* STDMETHODCALLTYPE Class_New(LPTSTR aClassName, UINT aClassSize, ObjectMember aMembers[], int aMemberCount, Prototype*& aPrototype, Object* aBase = nullptr);
 
 	virtual IObject* STDMETHODCALLTYPE GetEnumerator(IObject* aObj, int aVarCount);
 	virtual bool STDMETHODCALLTYPE CallEnumerator(IObject* aEnumerator, ExprTokenType* aParam[], int aParamCount);

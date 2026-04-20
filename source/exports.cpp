@@ -569,19 +569,22 @@ thread_local int IAhkApi::sInit = 0;
 
 IAhkApi::Prototype::~Prototype() { if (OnDispose) OnDispose(); }
 
-Object* IAhkApi::Prototype::New(ExprTokenType* aParam[], int aParamCount) {
-	auto &si = *GetStructInfo(true);
-	auto size = mSuffixSize + si.size;
-	Object *obj = new (size) Object;
-	if (!obj)
-		return nullptr;
-	if (size)
-		ZeroMemory(obj + 1, size);
-	if (si.size)
-		obj->SetDataPtr((UINT_PTR)(obj + 1) + mSuffixSize);
-	obj->SetBase(this);
-	FuncResult result;
-	return obj->Initialize(result, aParam, aParamCount) == OK ? obj : nullptr;
+ResultType IAhkApi::Prototype::CallNew(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, Object *aBase, StructInfo *si) {
+	auto size = mExtraObjectSize + si->nested_object_size + si->size;
+	auto obj = si->create(size);
+	if (size) {
+		auto ptr = (UINT_PTR)obj + si->object_size - mExtraObjectSize;
+		ZeroMemory((void *)ptr, size);
+	}
+	if (si->size)
+		obj->mFlags |= DataIsSuffix;
+	obj->SetBase(aBase);
+	return obj->Initialize(aResultToken, aParam, aParamCount);
+}
+
+Object* IAhkApi::Prototype::New(ExprTokenType *aParam[], int aParamCount) {
+	FuncResult result{};
+	return CallNew(result, aParam, aParamCount, this, GetStructInfo(true)) == OK ? (Object *)result.object : nullptr;
 }
 
 void EarlyAppInit();
@@ -795,34 +798,34 @@ Func* STDMETHODCALLTYPE IAhkApi::Method_New(LPTSTR aFullName, ObjectMember& aMem
 	return func;
 }
 
-Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, size_t aClassSize, ObjectMember aMember[], int aMemberCount, Prototype*& aPrototype, Object* aBase) {
+Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, UINT aClassSize, ObjectMember aMember[], int aMemberCount, Prototype*& aPrototype, Object* aBase) {
 	static BuiltInFunctionType obj_ctor = [](BIF_DECL_PARAMS) {
-		auto base = static_cast<Prototype*>(aResultToken.callee_id);
+		auto nproto = (Prototype *)aResultToken.callee_id;
+		auto nsi = nproto->GetStructInfo(true);
 		IObject *cls = aParamCount ? TokenToObject(*aParam[0]) : nullptr;
 		IObject *prt = cls && cls->IsOfType(Object::sPrototype) ? ((Object *)cls)->GetOwnPropObj(_T("Prototype")) : nullptr;
 		Object *proto = prt && prt->IsOfType(Object::sPrototype) ? (Object *)prt : nullptr;
-		if (proto != base && (!proto || !proto->IsDerivedFrom(base)))
+		auto si = proto ? proto->GetStructInfo(true) : nullptr;
+		if (!si || si->create != nsi->create || si->object_size != nsi->object_size)
 			_f_throw_value(ERR_INVALID_BASE);
-		auto &si = *proto->GetStructInfo(true);
-		auto size = base->mSuffixSize + si.size;
-		Object* obj = new (size) Object;
-		if (!obj)
-			return;
-		if (size)
-			ZeroMemory(obj + 1, size);
-		if (si.size)
-			obj->SetDataPtr((UINT_PTR)(obj + 1) + base->mSuffixSize);
-		obj->SetBase(proto);
-		obj->Initialize(aResultToken, aParam + 1, aParamCount - 1);
+		nproto->CallNew(aResultToken, aParam + 1, aParamCount - 1, proto, si);
 	};
 	TCHAR full_name[MAX_VAR_NAME_LENGTH + 1];
 	Prototype* proto = nullptr;
+	if (!aBase)
+		aBase = Object::sPrototype;
+	if (!aBase->IsClassPrototype())
+		return nullptr;
 	if (!aPrototype) {
 		aPrototype = proto = new Prototype;
-		aPrototype->SetBase(aBase ? aBase : Object::sPrototype);
+		aPrototype->SetBase(aBase);
 		aPrototype->mFlags |= Object::ClassPrototype | Object::NativeClassPrototype;
 		aPrototype->SetOwnProp(_T("__Class"), ExprTokenType(aClassName));
-		aPrototype->mSuffixSize = aClassSize > sizeof(Object) ? aClassSize - sizeof(Object) : 0;
+		auto &si = *aPrototype->GetStructInfo(false);
+		if (aClassSize > si.object_size) {
+			aPrototype->mExtraObjectSize = aClassSize - si.object_size;
+			si.object_size = aClassSize;
+		}
 
 		TCHAR* name = full_name + _stprintf(full_name, _T("%s.Prototype."), aClassName);
 		for (int i = 0; i < aMemberCount; ++i)
@@ -859,8 +862,7 @@ Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, size_t aClassSiz
 		}
 	}
 
-	auto class_obj = Object::CreateClass(aPrototype);
-	class_obj->SetBase(Object::sClass);
+	auto class_obj = Object::CreateClass(aPrototype, Object::sClass);
 	if (!proto)
 		aPrototype->AddRef();
 	_stprintf(full_name, _T("%s.Call"), aClassName);

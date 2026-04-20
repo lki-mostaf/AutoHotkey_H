@@ -281,8 +281,8 @@ public:
 		UnsortedFlag = 0x80000000,
 		ClassPrototype = 0x01,
 		NativeClassPrototype = 0x02,
-		DataIsSetFlag = 0x04,
-		//unused = 0x08,
+		DataIsSuffix = 0x04,
+		DataIsSuffixPtr = 0x08,
 		StructInfoInitialized = 0x10,
 		StructInfoLocked = 0x20,
 		NoCallDelete = 0x40,
@@ -290,15 +290,19 @@ public:
 		LastObjectFlag = 0x80
 	};
 
+	typedef Object* (*NewObjectProc)(size_t);
 	struct StructInfo
 	{
+		NewObjectProc create;
 		size_t size;
 		size_t align;
-		size_t nested_count;
-		size_t item_count; // Separate from nested_count for simplicity maintainability (since arrays of numbers have no nested objects).
+		size_t nested_object_size;
+		size_t item_count;
+		void *first_field, *last_field;
 		Object *pointed_class;
 		Object *pointer_class;
 		Map *array_class_map;
+		UINT object_size;
 		MdType native_type;
 		UCHAR dllcall_type;
 		bool is_unsigned;
@@ -306,8 +310,7 @@ public:
 
 	Object* mBase = nullptr;
 	FlatVector<FieldType, index_t> mFields;
-	void *mData = nullptr;
-	Object **mNested = nullptr;
+	Object *mOuter = nullptr;
 };
 class Array : public Object
 {
@@ -569,8 +572,8 @@ public:
 	{
 	public:
 		StructInfo mInfo{};
-		size_t mSuffixSize;
 		void (*OnDispose)() = nullptr;
+		UINT mExtraObjectSize = 0;
 		~Prototype();
 		virtual Object *New(ExprTokenType *aParam[], int aParamCount);
 	};
@@ -606,7 +609,7 @@ public:
 	virtual Func *STDMETHODCALLTYPE Func_New(FuncEntry &aBIF);
 	virtual Func *STDMETHODCALLTYPE Method_New(LPTSTR aFullName, ObjectMember &aMember, Object *aPrototype);
 	// `aPrototype` does not need to be released, `obj->IsOfType(aPrototype)` is used to check the object type
-	virtual Object *STDMETHODCALLTYPE Class_New(LPTSTR aClassName, size_t aClassSize, ObjectMember aMembers[], int aMemberCount, Prototype *&aPrototype, Object *aBase = nullptr);
+	virtual Object *STDMETHODCALLTYPE Class_New(LPTSTR aClassName, UINT aClassSize, ObjectMember aMembers[], int aMemberCount, Prototype *&aPrototype, Object *aBase = nullptr);
 
 	virtual IObject *STDMETHODCALLTYPE GetEnumerator(IObject *aObj, int aVarCount);
 	virtual bool STDMETHODCALLTYPE CallEnumerator(IObject *aEnumerator, ExprTokenType *aParam[], int aParamCount);
