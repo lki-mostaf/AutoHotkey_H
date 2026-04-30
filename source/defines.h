@@ -237,6 +237,14 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_STREAM   // Marshal IUnknown* in Stream
 };
 
+enum class UnsetKind
+{
+	Blank, // Reverts to "" in v2.0 mode.
+	Unset, // Throws UnsetError.
+	UnsetItem, // Throws UnsetItemError.
+	Unspecified // Throws UnsetError or UnsetItemError depending on how the function was called.
+};
+
 // This should include all operators which can produce SYM_VAR for a subsequent assignment:
 #define IS_OPERATOR_VALID_LVALUE(sym) \
 	(IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(sym) \
@@ -361,6 +369,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 				Var *var;             // for SYM_VAR and SYM_DYNAMIC
 				LPTSTR marker;        // for SYM_STRING
 				ExprTokenType *circuit_token; // for short-circuit operators
+				UnsetKind unset_kind; // for SYM_MISSING
 			};
 			union // Due to the outermost union, this doesn't increase the total size of the struct on x86 builds (but it does on x64).
 			{
@@ -406,6 +415,12 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 		ASSERT(aValue);
 		symbol = SYM_OBJECT;
 		object = aValue;
+	}
+
+	void Unset(UnsetKind aKind = UnsetKind::Unspecified)
+	{
+		symbol = SYM_MISSING;
+		unset_kind = aKind;
 	}
 
 	inline void CopyValueFrom(ExprTokenType &other)
@@ -459,7 +474,6 @@ private: // Force code to use one of the CopyFrom() methods, for clarity.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
 
-class Object;
 class BuiltInFunc;
 struct ResultToken : public ExprTokenType
 {
@@ -472,8 +486,7 @@ struct ResultToken : public ExprTokenType
 	// Utility function for initializing result tokens.
 	void InitResult(LPTSTR aResultBuf)
 	{
-		symbol = SYM_STRING;
-		marker = _T("");
+		ExprTokenType::Unset(UnsetKind::Blank);
 		marker_length = -1; // Helps code size to do this here instead of in ReturnPtr(), which should be inlined.
 		buf = aResultBuf;
 		mem_to_free = nullptr;
@@ -481,6 +494,17 @@ struct ResultToken : public ExprTokenType
 		named_params = nullptr;
 #endif
 		result = OK;
+	}
+	
+	void InitInvokeRetVal()
+	{
+		ExprTokenType::Unset(UnsetKind::Blank);
+	}
+
+	void Unset(UnsetKind aKind = UnsetKind::Unspecified)
+	{
+		ASSERT(!mem_to_free && symbol != SYM_OBJECT);
+		ExprTokenType::Unset(aKind);
 	}
 
 	// Utility function for properly freeing a token's contents.
@@ -564,7 +588,7 @@ struct ResultToken : public ExprTokenType
 
 	ResultType SoftFail()
 	{
-		symbol = SYM_MISSING;
+		Unset();
 		// Caller may rely on FAIL to unwind stack, but this->result is still OK.
 		return FAIL;
 	}

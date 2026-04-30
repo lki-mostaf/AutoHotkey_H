@@ -56,7 +56,7 @@ ResultType CallMethod(IObject *aInvokee, IObject *aThis, LPTSTR aMethodName
 			result = TokenToBOOL(result_token) ? CONDITION_TRUE : CONDITION_FALSE;
 		else
 			// Indicate to caller whether an integer value was returned (for MsgMonitor()).
-			result = TokenIsEmptyString(result_token) ? OK : EARLY_RETURN;
+			result = TokenIsBlank(result_token) ? OK : EARLY_RETURN;
 	}
 	
 	if (aRetVal) // Always set this as some callers don't initialize it:
@@ -202,18 +202,17 @@ void Object::NewInstance(ResultToken &aResultToken, ExprTokenType *aParam[], int
 	IObject *cls = ParamIndexToObject(0);
 	// For backward-compatibility, this must permit any Object (not just a Class)
 	// with a Prototype own property which is any Object (not just a Prototype).
-	IObject *prt = cls && cls->IsOfType(Object::sPrototype) ? ((Object*)cls)->GetOwnPropObj(_T("Prototype")) : nullptr;
-	Object *proto = prt && prt->IsOfType(Object::sPrototype) ? (Object*)prt : nullptr;
+	Object *proto = cls && cls->IsOfType(Object::sPrototype) ? ((Object*)cls)->ClassGetPrototypeBackwardCompatible() : nullptr;
 	auto si = proto ? proto->GetStructInfo(true) : nullptr;
 	if (!si || si->create != nsi->create)
 		_f_throw_value(ERR_INVALID_BASE);
 
-	auto obj = si->create(si->nested_object_size + si->size);
-	ASSERT(si->size || !si->nested_object_size);
-	if (si->size)
+	auto suffix = si->nested_object_size + si->size;
+	auto obj = si->create(suffix);
+	if (suffix)
 	{
 		auto ptr = (UINT_PTR)obj + si->object_size;
-		ZeroMemory((void*)ptr, si->nested_object_size + si->size);
+		ZeroMemory((void*)ptr, suffix);
 		obj->mFlags |= DataIsSuffix;
 	}
 	obj->SetBase(proto);
@@ -737,8 +736,10 @@ Object::~Object()
 		if (si.array_class_map)
 			si.array_class_map->Release();
 	}
-	else if (mBase)
+	else if (mFlags & (DataIsSuffix | DataIsSuffixPtr))
 	{
+		if (!mBase)
+			return;
 		// Call native destructor for each nested object and release any pointer held for a Ptr field.
 		auto si = mBase->GetStructInfo();
 		for (auto tp = si->last_field; tp; tp = tp->prev_field) // prev_field list includes inherited fields.
@@ -754,10 +755,11 @@ Object::~Object()
 				else
 				{
 					auto p = (Object*)nest;
-					p->~Object();
+					if (*(UINT_PTR*)p) // vftbl initialized
+						p->~Object();
 				}
 			}
-		if (si->pointed_class) // Struct.Array or Struct.Ptr class.
+		if (si->pointed_class) // Struct.Array or Struct.Ptr class, or a Class.
 		{
 			// Element type is inferred by overall nest size and count.
 			size_t count = max(si->item_count, 1);
@@ -837,7 +839,7 @@ LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
 ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 {
 	// In debug mode, verify aResultToken has been initialized correctly.
-	ASSERT(aResultToken.symbol == SYM_STRING && aResultToken.marker && !*aResultToken.marker);
+	ASSERT(aResultToken.symbol == SYM_MISSING);
 	ASSERT(aResultToken.Result() == OK);
 
 	name_t name;
@@ -1171,7 +1173,7 @@ ResultType Object::GetBoxedPointer(ResultToken &aResultToken, UINT_PTR aPtr, Obj
 	{
 		if (!aPtr)
 		{
-			aResultToken.symbol = SYM_MISSING;
+			aResultToken.Unset();
 			return OK;
 		}
 		*nest = sp = CreateStructPtr(aPrototype, aPtr);
@@ -1338,8 +1340,7 @@ ResultType Object::ApplyParams(ResultToken &aThisResultToken, int aFlags, ExprTo
 	ResultToken this_token;
 	this_token.CopyValueFrom(aThisResultToken);
 	this_token.mem_to_free = aThisResultToken.mem_to_free;
-	aThisResultToken.mem_to_free = nullptr;
-	aThisResultToken.SetValue(_T(""), -1);
+	aThisResultToken.InitResult(aThisResultToken.buf);
 	auto &aResultToken = aThisResultToken;
 	
 	IObject *this_obj = TokenToObject(this_token);
@@ -1424,7 +1425,7 @@ void Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *
 			{
 				auto result = Invoke(aResultToken, IT_GET | IF_IGNORE_DEFAULT, _T("Default"), ExprTokenType { this }, nullptr, 0);
 				if (result == INVOKE_NOT_HANDLED)
-					_o_return_unset;
+					_o_return_unset_item;
 				return;
 			}
 			// Otherwise, caller provided a default value.
@@ -1583,7 +1584,7 @@ bool Array::Append(ExprTokenType &aValue)
 
 void Object::EndClassDefinition()
 {
-	auto &obj = *(Object *)GetOwnPropObj(_T("Prototype"));
+	auto &obj = *ClassGetPrototype();
 	// Each variable declaration created a 'missing' property in the class or prototype object to prevent
 	// duplicate or conflicting declarations.  Remove them now so that the declaration acts like a normal
 	// assignment (i.e. invokes property setters and __Set), for flexibility and consistency.
@@ -1635,19 +1636,11 @@ Object *Object::GetNativeBase()
 }
 
 
-Object *Object::ClassGetPrototype()
+Object *Object::ClassGetPrototypeBackwardCompatible()
 {
-	if (IObject *p = GetOwnPropObj(_T("Prototype")))
-	{
-		// A valid prototype always has exactly the vftbl of Object::sPrototype.
-		// This produces smaller and faster code than dynamic_cast<Object*>().
-		// Callers want to be sure this is really an Object* and a Prototype,
-		// not something odd like {Prototype: Map()} or {Prototype: RECT()}.
-		if (*(void**)p == *(void**)(IObject*)Object::sPrototype
-			&& ((Object*)p)->IsClassPrototype())
-			return (Object*)p;
-	}
-	return nullptr;
+	if (auto p = GetOwnPropObj(_T("Prototype")))
+		return p->IsOfType(Object::sPrototype) ? (Object*)p : nullptr;
+	return ClassGetPrototype();
 }
 
 
@@ -1701,11 +1694,13 @@ LPTSTR Object::Type()
 
 Object *Object::CreateClass(Object *aPrototype, Object *aBase)
 {
-	auto cls = new Object();
+	auto cls = new (sizeof(Object*)) Object(ObjectIsClass | DataIsSuffix);
 	cls->SetBase(aBase);
-	cls->SetOwnProp(_T("Prototype"), aPrototype);
+	if (!sStructPrototype || !aPrototype->IsDerivedFrom(sStructPrototype))
+		cls->SetOwnProp(_T("Prototype"), aPrototype);
+	*(Object**)(cls + 1) = aPrototype;
 	// ahk_h: The class should be the only reference to the prototype so that it can be released on exit.
-	aPrototype->Release();
+	// aPrototype->AddRef();
 	return cls;
 }
 
@@ -1912,7 +1907,7 @@ Object *Object::CreatePtrClass(Object *sc, Object *sp, StructInfo *spsi)
 		si->dllcall_type = spsi->dllcall_type;
 		si->is_unsigned = spsi->is_unsigned;
 	}
-	// ahk_h: Has been released in CreateClass
+	// ahk_h: No AddRef() in CreateClass
 	// ptr_pro->Release();
 	_freea(buf);
 
@@ -1925,7 +1920,7 @@ BIF_DECL(StructClass_Ptr)
 	if (_f_callee_id && aResultToken.symbol == SYM_OBJECT)
 	{
 		auto cls = (Object*)aResultToken.object;
-		aResultToken.SetValue(_T(""));
+		aResultToken.InitInvokeRetVal();
 		cls->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType{ cls }, aParam + 1, aParamCount - 1);
 		cls->Release();
 	}
@@ -1962,7 +1957,8 @@ void Object::CreateCArrayClass(ResultToken &aResultToken, ExprTokenType &aOfClas
 	auto ac = CreateClass(ap, Object::sCArrayClass);
 	auto si = (StructInfo*)(ap + 1);
 	ap->mFlags |= StructInfoInitialized | StructInfoLocked;
-	ap->Release();
+	// ahk_h: No AddRef() in CreateClass
+	// ap->Release();
 
 	// Cache it.
 	if (!map->SetItem(key, ExprTokenType(ac)))
@@ -2012,7 +2008,6 @@ void Object::DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 		_o_return_empty;
 	field->ReturnMove(aResultToken); // Return the removed value.
 	mFields.Remove((index_t)(field - mFields), 1);
-	_o_return_empty;
 }
 
 void Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
@@ -2029,7 +2024,7 @@ void Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *
 	{
 		// Our return value when only one arg is given is supposed to be the value
 		// removed from this[arg], but there wasn't one.
-		_o_return_unset;
+		_o_return_unset_item;
 	}
 	// Set return value to the removed item.
 	item->ReturnMove(aResultToken);
@@ -2069,7 +2064,6 @@ void Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *
 void Map::Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	Clear();
-	_o_return_empty;
 }
 
 
@@ -2668,11 +2662,10 @@ ResultType Object::Initialize(ResultToken &aResultToken, ExprTokenType *aParam[]
 {
 	if (auto si = mBase->GetStructInfo(true))
 	{
-		if (si->nested_object_size)
+		if (si->nested_object_size >= sizeof(Object)) // May have constructible properties.
 		{
 			auto result = si->item_count ? CArrayNew(aResultToken, si)
-				: si->pointed_class ? OK // Pointer classes don't have constructible properties.
-				: NestedNew(aResultToken, si);
+				: NestedNew(aResultToken, DataPtr(), mBase);
 			if (result != OK)
 				return result;
 		}
@@ -2680,23 +2673,26 @@ ResultType Object::Initialize(ResultToken &aResultToken, ExprTokenType *aParam[]
 	return CallInitNew(aResultToken, aParam, aParamCount);
 }
 
-ResultType Object::NestedNew(ResultToken &aResultToken, StructInfo *si)
+ResultType Object::NestedNew(ResultToken &aResultToken, UINT_PTR aPtr, Object *aBase)
 {
-	ASSERT(si->nested_object_size && !si->item_count);
-	
-	auto data_ptr = DataPtr();
+	ASSERT(aBase->IsClassPrototype());
+	auto si = (StructInfo*)(aBase + 1);
+	if (si->nested_object_size < sizeof(Object)) // Definitely no constructible properties defined by aBase.
+		return OK;
 
 	ResultType result = OK;
+	if (aBase->mBase) // Construct inherited nested objects first.
+	{
+		result = NestedNew(aResultToken, aPtr, aBase->mBase);
+		if (result != OK)
+			return result;
+	}
+	
 	for (auto tprop = si->first_field; tprop; tprop = tprop->next_field)
 	{
 		if (!tprop->class_object || tprop->pointed_proto) // Primitive or Ptr
 			continue;
 		auto proto = tprop->class_object->ClassGetPrototype();
-		if (!proto) // FIXME: make this check unnecessary, either by making StructClass.Prototype read-only or storing the prototype elsewhere
-		{
-			result = aResultToken.Error(_T("Bad Prototype"), nullptr, ErrorPrototype::Type);
-			break;
-		}
 		
 		// Construct the nested object in the space reserved for it.
 		void *nest = (char*)this + tprop->object_offset;
@@ -2705,7 +2701,7 @@ ResultType Object::NestedNew(ResultToken &aResultToken, StructInfo *si)
 		++mRefCount;
 		nested->mOuter = this;
 		nested->SetBase(proto);
-		nested->SetDataPtr(data_ptr + tprop->data_offset);
+		nested->SetDataPtr(aPtr + tprop->data_offset);
 		result = nested->Initialize(aResultToken, nullptr, 0);
 		if (result != OK)
 		{
@@ -3251,7 +3247,7 @@ void Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType
 			auto result = Object::Invoke(aResultToken, IT_GET | IF_IGNORE_DEFAULT, _T("Default"), ExprTokenType{this}, nullptr, 0);
 			if (result != INVOKE_NOT_HANDLED)
 				_o_return_retval;
-			_o_return_unset;
+			_o_return_unset_item;
 		}
 		item.ReturnRef(aResultToken);
 		_o_return_retval;
@@ -3288,7 +3284,7 @@ void Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType
 			index = mLength;
 		if (!InsertAt(index, aParam, aParamCount))
 			_o_throw_oom;
-		_o_return_empty;
+		_o_return_unset_blank;
 	}
 
 	case M_RemoveAt:
@@ -4784,6 +4780,15 @@ void Object::CreateRootPrototypes()
 	auto anyClass = CreateClass(_T("Any"), sClassPrototype, sAnyPrototype, nullptr);
 	Object::sClass = CreateClass(_T("Object"), anyClass, Object::sPrototype, NewObject<Object>);
 	Object::sObjectCall = Object::sClass->GetOwnPropMethod(_T("Call"));
+	{
+		// Each Class is suffixed with a pointer to the Prototype. This instructs ~Object() to release it.
+		sClassPrototype->mFlags |= StructInfoInitialized | StructInfoLocked;
+		auto &si = *(StructInfo*)(sClassPrototype + 1);
+		si.nested_object_size = sizeof(Object*); // Pointer to Prototype.
+		si.pointed_class = sClass; // Must be non-zero for ~Object().
+		si.object_size = sizeof(Object); // For Class() without parameters.
+		si.create = NewObject<Object>;
+	}
 
 	ObjectCtor no_ctor = nullptr;
 	ObjectMemberListType no_members;
@@ -4879,6 +4884,7 @@ void Object::CreateRootPrototypes()
 	});
 
 	sStructClass = (Object*)g_script->FindGlobalVar(_T("Struct"), 6)->Object();
+	sStructClass->DefinePrototypeGetter();
 	sStructClass->DefineMethod(_T("At"), bif = new BuiltInFunc {_T("Struct.At"), StructClass_At, 2, 2});
 	bif->Release();
 	prop = sStructClass->DefineProperty(_T("__Item"));
@@ -4921,8 +4927,8 @@ void Object::CreateRootPrototypes()
 	sCArrayPrototype->mFlags &= ~NativeClassPrototype;
 	sCArrayClass = CreateClass(sCArrayPrototype, sStructClass);
 	sStructClass->DefineClass(_T("Array"), sCArrayClass, true);
-	g_script->mSubClasses->Append(ExprTokenType{ sCArrayClass });
-	sCArrayClass->Release();
+	// ahk_h: otherwise Struct.Array.Ptr will be leaked.
+	CreatePtrClass(sCArrayClass, sCArrayPrototype, sCArrayPrototype->GetStructInfo(true))->Release();
 
 	LPTSTR const type_names[]{ _T("Float32"), _T("Float64"), _T("Int16"), _T("Int32"), _T("Int64"), _T("Int8"), _T("IntPtr"), _T("UInt16"), _T("UInt32"), _T("UInt8") };
 	MdType const type_codes[]{ MdType::Float32, MdType::Float64, MdType::Int16, MdType::Int32, MdType::Int64, MdType::Int8, MdType::IntPtr, MdType::UInt16, MdType::UInt32, MdType::UInt8 };
@@ -5062,6 +5068,27 @@ void Object::DefineClass(name_t aName, Object *aClass, bool aIsStructPtrClass)
 }
 
 
+void Object::DefinePrototypeGetter()
+{
+	static BuiltInFunc sClassPrototypeGet{ _T("Class.Prototype.Get"), Class_Prototype, 1, 1 };
+
+	auto prop = DefineProperty(_T("Prototype"));
+	prop->SetGetter(&sClassPrototypeGet);
+	prop->NoParamGet = true;
+}
+
+
+BIF_DECL(Class_Prototype)
+{
+	auto obj0 = ParamIndexToObject(0);
+	auto p = obj0 && obj0->IsOfType(Object::sPrototype) ? ((Object*)obj0)->ClassGetPrototype() : nullptr;
+	if (!p)
+		_o_throw_type(_T("Class"), *aParam[0]);
+	p->AddRef();
+	_o_return(p);
+}
+
+
 BIF_DECL(Class_GetNestedClass)
 {
 	auto info = (NestedClassInfo *)aResultToken.callee_id;
@@ -5088,7 +5115,7 @@ BIF_DECL(Class_CallNestedClass)
 		aResultToken.InitResult(aResultToken.buf);
 	}
 	else
-		aResultToken.symbol = SYM_STRING; // Set the default expected by Invoke.
+		aResultToken.InitInvokeRetVal();
 	cls->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType { cls }, aParam + 1, aParamCount - 1);
 }
 
@@ -5125,7 +5152,7 @@ BIF_DECL(Class_New)
 
 	auto proto = Object::CreatePrototype(name, base_proto);
 	auto class_obj = Object::CreateClass(proto, base_class);
-	// ahk_h: Has been released in CreateClass
+	// ahk_h: No AddRef() in CreateClass
 	// proto->Release();
 
 	// Don't call any inherited __Init, since that would reinitialize static variables and duplicate

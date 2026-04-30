@@ -576,7 +576,7 @@ ResultType IAhkApi::Prototype::CallNew(ResultToken &aResultToken, ExprTokenType 
 		auto ptr = (UINT_PTR)obj + si->object_size - mExtraObjectSize;
 		ZeroMemory((void *)ptr, size);
 	}
-	if (si->size)
+	if (size - mExtraObjectSize)
 		obj->mFlags |= DataIsSuffix;
 	obj->SetBase(aBase);
 	return obj->Initialize(aResultToken, aParam, aParamCount);
@@ -803,8 +803,7 @@ Object* STDMETHODCALLTYPE IAhkApi::Class_New(LPTSTR aClassName, UINT aClassSize,
 		auto nproto = (Prototype *)aResultToken.callee_id;
 		auto nsi = nproto->GetStructInfo(true);
 		IObject *cls = aParamCount ? TokenToObject(*aParam[0]) : nullptr;
-		IObject *prt = cls && cls->IsOfType(Object::sPrototype) ? ((Object *)cls)->GetOwnPropObj(_T("Prototype")) : nullptr;
-		Object *proto = prt && prt->IsOfType(Object::sPrototype) ? (Object *)prt : nullptr;
+		Object *proto = cls && cls->IsOfType(Object::sPrototype) ? ((Object*)cls)->ClassGetPrototypeBackwardCompatible() : nullptr;
 		auto si = proto ? proto->GetStructInfo(true) : nullptr;
 		if (!si || si->create != nsi->create || si->object_size != nsi->object_size)
 			_f_throw_value(ERR_INVALID_BASE);

@@ -394,9 +394,8 @@ BIF_DECL(BIF_ComObjType)
 	}
 	else
 	{
-		aResultToken.symbol = SYM_STRING; // for all code paths below
-		aResultToken.marker = _T(""); // in case of error
-		aResultToken.marker_length = 0;
+		aResultToken.marker = _T(""); // Set default for the case of no name/IID.
+		aResultToken.symbol = SYM_STRING; // As above but also for IID success path.
 
 		LPTSTR requested_info = TokenToString(*aParam[1]);
 
@@ -730,7 +729,7 @@ void VariantToToken(VARIANT &aVar, ResultToken &aToken, bool aRetainVar)
 	case VT_ERROR:
 		if (aVar.scode == DISP_E_PARAMNOTFOUND)
 		{
-			aToken.symbol = SYM_MISSING;
+			aToken.Unset();
 			break;
 		}
 		// FALL THROUGH to the next case:
@@ -2032,7 +2031,8 @@ BIF_DECL(BIF_ComObjDll)
 	HMODULE hDLL;
 	if (ParamIndexIsOmitted(0) || !(hDLL = (HMODULE)TokenToInt64(*aParam[0])))
 		_f_throw_param(0);
-	if (ParamIndexIsOmittedOrEmpty(1))
+	auto sclisd = ParamIndexToString(1);
+	if (*sclisd)
 		_f_throw_param(1);
 
 	typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR *ppv);
@@ -2042,10 +2042,12 @@ BIF_DECL(BIF_ComObjDll)
 		GetClassObject = (pDllGetClassObject)::GetProcAddress(hDLL,"DllGetClassObject");
 	else
 		GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(hDLL,"DllGetClassObject");
+	if (!GetClassObject)
+		_f_throw_win32(ERROR_PROC_NOT_FOUND);
 	IClassFactory *pClassFactory = NULL;
 	CLSID clsid;
 	HRESULT hr;
-	if (FAILED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &clsid)) ||
+	if (FAILED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(sclisd), &clsid)) ||
 		FAILED(hr = GetClassObject(clsid, IID_IClassFactory, (LPVOID *)&pClassFactory)))
 		return ComError(hr, aResultToken);
 

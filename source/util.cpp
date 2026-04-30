@@ -3505,7 +3505,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, LPTSTR pwd, int 
 		aBuffer = aBufferMem;
 	else aSize = sz;
 	LPVOID aBufferPtr;
-	if (pwd)
+	if (pwd && *pwd)
 	{
 		CryptBinaryToStringA(aBuffer, (DWORD)aSize, CRYPT_STRING_BASE64, NULL, &aSizeEncoded);
 		if (!(aBufferPtr = malloc(aSizeEncoded + 17)))

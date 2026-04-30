@@ -1624,7 +1624,7 @@ int Debugger::ParsePropertyName(LPWSTR aNamePtr, int aDepth, int aVarScope, Expr
 					// `property_set -n <exception> --` is our non-standard way to "clear the exception" (suppress the error dialog).
 					if (aSetValue)
 					{
-						if (!TokenIsEmptyString(*aSetValue))
+						if (!TokenIsBlank(*aSetValue))
 						{
 							err = DEBUGGER_E_INVALID_OPTIONS;
 							break;
@@ -1706,7 +1706,7 @@ int Debugger::ParsePropertyName(LPWSTR aNamePtr, int aDepth, int aVarScope, Expr
 			else if (inv->outer && (c == ',' || c == inv->end_char))
 			{
 				// Missing parameter or empty parameter list.
-				lastval.symbol = SYM_MISSING;
+				lastval.Unset();
 			}
 			else
 				break; // Syntax error; err will be set due to *cp != 0.
@@ -2023,7 +2023,7 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 		prop.kind = PropValue;
 		if (prop.value.symbol == SYM_OBJECT)
 			prop.value.object->Release();
-		prop.value.symbol = SYM_MISSING;
+		prop.value.Unset();
 	}
 	//else var and field were set by the called function.
 

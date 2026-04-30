@@ -407,7 +407,8 @@ BIF_DECL(BIF_UnZip)
 			err = UnzipFindItem(huz, &ze, 1);
 		}
 		if (err) goto errorclose;
-		_tcscpy(aTargetDir + size, !ParamIndexIsOmittedOrEmpty(3) ? TokenToString(*aParam[3]) : ze.Name + 1);
+		auto p = ParamIndexToOptionalString(3);
+		_tcscpy(aTargetDir + size, *p ? p : ze.Name + 1);
 		if (err = UnzipItemToFile(huz, aTargetDir, &ze))
 			goto errorclose;
 	}
@@ -446,13 +447,29 @@ BIF_DECL(BIF_UnZipBuffer)
 			if (!size)
 				_o_throw_value(ERR_PARAM2_INVALID);
 		}
+		if (ParamIndexIsOmitted(2))
+			_o_throw_value(ERR_PARAM3_REQUIRED);
 		aParam++;
 		aParamCount--;
 	}
+	else {
+		path = ParamIndexToString(0);
+		if (*path)
+			_o_throw_value(ERR_PARAM1_INVALID);
+	}
+
+	ZIPENTRY	ze{};
+	LPTSTR pitem = nullptr;
+	if (TokenIsPureNumeric(*aParam[1]))
+		ze.Index = (ULONGLONG)TokenToInt64(*aParam[1]);
 	else
-		path = TokenToString(*aParam[0]);
-	if (ParamIndexIsOmittedOrEmpty(1))
-		_o_throw_param(!path && !obj ? 2 : 1);
+	{
+		size_t len;
+		pitem = TokenToString(*aParam[1], NULL, &len);
+		if (len > MAX_PATH - 2)
+			_o_throw(_T("Path too long."));
+		_tcscpy(ze.Name, pitem);
+	}
 
 	auto codepage = (UINT)ParamIndexToOptionalInt(3, 0);
 	CStringCharFromTChar pw(ParamIndexToOptionalString(2));
@@ -463,23 +480,7 @@ BIF_DECL(BIF_UnZipBuffer)
 	if (err)
 		goto error;
 
-	ZIPENTRY	ze;
-	if (TokenIsPureNumeric(*aParam[1]))
-	{
-		ze.Index = (ULONGLONG)TokenToInt64(*aParam[1]);
-		err = UnzipGetItem(huz, &ze);
-	}
-	else
-	{
-		auto item = TokenToString(*aParam[1]);
-		if (_tcslen(item) > MAX_PATH - 2)
-		{
-			UnzipClose(huz);
-			_o_throw(_T("Path too long."));
-		}
-		_tcscpy(ze.Name, item);
-		err = UnzipFindItem(huz, &ze, 1);
-	}
+	err = pitem ? UnzipFindItem(huz, &ze, 1) : UnzipGetItem(huz, &ze);
 	if (err) goto errorclose;
 	auto buf = malloc((size_t)ze.UncompressedSize);
 	if (!buf)
@@ -511,7 +512,7 @@ BIF_DECL(BIF_UnZipRawMemory)
 		GetBufferObjectPtr(aResultToken, obj, ptr, size);
 		if (aResultToken.Exited())
 			return;
-		pwd = ParamIndexIsOmittedOrEmpty(1) ? NULL : TokenToString(*aParam[1]);
+		pwd = ParamIndexToOptionalString(1);
 	}
 	else
 	{
@@ -519,7 +520,7 @@ BIF_DECL(BIF_UnZipRawMemory)
 			_o_throw_param(1);
 		ptr = (size_t)TokenToInt64(*aParam[0]);
 		size = (size_t)TokenToInt64(*aParam[1]);
-		pwd = ParamIndexIsOmittedOrEmpty(2) ? NULL : TokenToString(*aParam[2]);
+		pwd = ParamIndexToOptionalString(2);
 	}
 	if (ptr < 65536 || !size)
 		_o_throw_value(ERR_PARAM_INVALID);
@@ -553,8 +554,9 @@ BIF_DECL(BIF_ZipAddBuffer)
 
 BIF_DECL(BIF_ZipAddFile)
 {
+	auto dest = ParamIndexToOptionalString(2);
 	if (auto aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]),
-		ParamIndexIsOmittedOrEmpty(2) ? NULL : TokenToString(*aParam[2]),
+		*dest ? dest : NULL,
 		TokenToString(*aParam[1])))
 		_o_throw_zip(aErrCode);
 }
@@ -701,14 +703,14 @@ BIF_DECL(BIF_ZipRawMemory)
 		GetBufferObjectPtr(aResultToken, obj, ptr, size);
 		if (aResultToken.Exited())
 			return;
-		pwd = ParamIndexIsOmittedOrEmpty(1) ? NULL : TokenToString(*aParam[1]);
+		pwd = ParamIndexToOptionalString(1);
 		level = ParamIndexToOptionalInt(2, 5);
 	}
 	else
 	{
 		ptr = (size_t)TokenToInt64(*aParam[0]);
 		size = (DWORD)TokenToInt64(*aParam[1]);
-		pwd = ParamIndexIsOmittedOrEmpty(2) ? NULL : TokenToString(*aParam[2]);
+		pwd = ParamIndexToOptionalString(2);
 		level = ParamIndexToOptionalInt(3, 5);
 	}
 	if (ptr < 65536 || !size)
@@ -1098,8 +1100,11 @@ void JSON::Stringify(ResultToken &aResultToken, ExprTokenType *aParam[], int aPa
 						indent[indent_len = (UINT)sz] = '\0';
 					}
 				}
-				else if (!TokenIsEmptyString(val))
-					indent = TokenToString(val), indent_len = (UINT)_tcslen(indent);
+				else if (indent = TokenToString(val)) {
+					if (*indent)
+						indent_len = (UINT)_tcslen(indent);
+					else indent = NULL;
+				}
 			}
 		}
 		objcolon = indent ? _T("\": ") : _T("\":");

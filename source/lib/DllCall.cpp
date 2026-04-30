@@ -747,8 +747,7 @@ has_valid_return_type:
 
 	if (return_struct_size)
 	{
-		aResultToken.symbol = SYM_STRING; // Set default for Invoke.
-		aResultToken.marker = _T("");
+		aResultToken.InitInvokeRetVal();
 		if (Object::CreateStruct(aResultToken, return_proto) != OK)
 			return; // Initialize releases obj on failure.
 		ASSERT(aResultToken.symbol == SYM_OBJECT);
@@ -946,8 +945,7 @@ has_valid_return_type:
 		case DLL_ARG_STRUCT: {
 			if (!this_param_obj || !this_param_obj->IsOfType(param_proto))
 			{
-				aResultToken.symbol = SYM_STRING; // Set default for Invoke.
-				aResultToken.marker = _T("");
+				aResultToken.InitInvokeRetVal();
 				if (Object::CreateStruct(aResultToken, param_proto) != OK)
 					return; // Initialize releases obj on failure.
 				ASSERT(aResultToken.symbol == SYM_OBJECT);
@@ -955,8 +953,7 @@ has_valid_return_type:
 				pObj[nObj++] = this_param_obj = obj;
 				if (aParam[i]->symbol != SYM_VAR || !aParam[i]->var->IsUninitialized()) // It's not &var, or var has a value.
 				{
-					aResultToken.symbol = SYM_STRING; // Set default for Invoke (New set aResultToken to obj without calling AddRef).
-					aResultToken.marker = _T("");
+					aResultToken.InitInvokeRetVal(); // Set default for Invoke (New set aResultToken to obj without calling AddRef).
 					auto result = obj->Invoke(aResultToken, IT_SET | IF_BYPASS_METAFUNC | IF_NO_NEW_PROPS
 						, _T("__Value"), ExprTokenType(obj), aParam + i, 1);
 					if (result == INVOKE_NOT_HANDLED && this_param.symbol != SYM_MISSING)
@@ -1328,8 +1325,7 @@ has_valid_return_type:
 
 	if (return_struct_size && !aResultToken.Exited())
 	{
-		aResultToken.symbol = SYM_STRING; // Set default for Invoke.
-		aResultToken.marker = _T("");
+		aResultToken.InitInvokeRetVal();
 		auto result = pObj[0]->Invoke(aResultToken, IT_GET | IF_BYPASS_METAFUNC, _T("__value"), ExprTokenType(pObj[0]), nullptr, 0);
 		if (result == INVOKE_NOT_HANDLED)
 		{
