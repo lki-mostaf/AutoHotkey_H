@@ -29,24 +29,24 @@ EXTERN_G;
 // ALREADY DEFINED: #define VK_HELP 0x2F
 // In case a compiler with a non-updated header file is used:
 #ifndef VK_BROWSER_BACK
-	#define VK_BROWSER_BACK        0xA6
-	#define VK_BROWSER_FORWARD     0xA7
-	#define VK_BROWSER_REFRESH     0xA8
-	#define VK_BROWSER_STOP        0xA9
-	#define VK_BROWSER_SEARCH      0xAA
-	#define VK_BROWSER_FAVORITES   0xAB
-	#define VK_BROWSER_HOME        0xAC
-	#define VK_VOLUME_MUTE         0xAD
-	#define VK_VOLUME_DOWN         0xAE
-	#define VK_VOLUME_UP           0xAF
-	#define VK_MEDIA_NEXT_TRACK    0xB0
-	#define VK_MEDIA_PREV_TRACK    0xB1
-	#define VK_MEDIA_STOP          0xB2
-	#define VK_MEDIA_PLAY_PAUSE    0xB3
-	#define VK_LAUNCH_MAIL         0xB4
-	#define VK_LAUNCH_MEDIA_SELECT 0xB5
-	#define VK_LAUNCH_APP1         0xB6
-	#define VK_LAUNCH_APP2         0xB7
+#define VK_BROWSER_BACK 0xA6
+#define VK_BROWSER_FORWARD 0xA7
+#define VK_BROWSER_REFRESH 0xA8
+#define VK_BROWSER_STOP 0xA9
+#define VK_BROWSER_SEARCH 0xAA
+#define VK_BROWSER_FAVORITES 0xAB
+#define VK_BROWSER_HOME 0xAC
+#define VK_VOLUME_MUTE 0xAD
+#define VK_VOLUME_DOWN 0xAE
+#define VK_VOLUME_UP 0xAF
+#define VK_MEDIA_NEXT_TRACK 0xB0
+#define VK_MEDIA_PREV_TRACK 0xB1
+#define VK_MEDIA_STOP 0xB2
+#define VK_MEDIA_PLAY_PAUSE 0xB3
+#define VK_LAUNCH_MAIL 0xB4
+#define VK_LAUNCH_MEDIA_SELECT 0xB5
+#define VK_LAUNCH_APP1 0xB6
+#define VK_LAUNCH_APP2 0xB7
 #endif
 
 // Create some "fake" virtual keys to simplify sections of the code.
@@ -59,12 +59,12 @@ EXTERN_G;
 // 0x88 - 0x8F : unassigned
 // 0x97 - 0x9F : unassigned (this range seems less likely to be used)
 #define VK_NEW_MOUSE_FIRST 0x9A
-#define VK_WHEEL_LEFT      0x9C // v1.0.48: Lexikos: Fake virtual keys for support for horizontal scrolling in
-#define VK_WHEEL_RIGHT     0x9D // Windows Vista and later.
-#define VK_WHEEL_DOWN      0x9E
-#define VK_WHEEL_UP        0x9F
+#define VK_WHEEL_LEFT 0x9C	// v1.0.48: Lexikos: Fake virtual keys for support for horizontal scrolling in
+#define VK_WHEEL_RIGHT 0x9D // Windows Vista and later.
+#define VK_WHEEL_DOWN 0x9E
+#define VK_WHEEL_UP 0x9F
 #define IS_WHEEL_VK(aVK) ((aVK) >= VK_WHEEL_LEFT && (aVK) <= VK_WHEEL_UP)
-#define VK_NEW_MOUSE_LAST  0x9F
+#define VK_NEW_MOUSE_LAST 0x9F
 
 // These are the only keys for which another key with the same VK exists.  Therefore, use scan code for these.
 // If use VK for some of these (due to them being more likely to be used as hotkeys, thus minimizing the
@@ -81,6 +81,15 @@ EXTERN_G;
 #define SC_RIGHT 0x14D
 #define SC_PGUP 0x149
 #define SC_PGDN 0x151
+
+//
+#define KEY_AHK_INTERNAL 0x00080000u
+#define KEY_AHK_INTERNAL_MASK 0x00080000u
+
+inline bool IsAhkGenerated(ULONG_PTR aExtraInfo)
+{
+	return (aExtraInfo & KEY_AHK_INTERNAL_MASK) == KEY_AHK_INTERNAL;
+}
 
 // These are the same scan codes as their counterpart except the extended flag is 0 rather than
 // 1 (0xE0 uncompressed):
@@ -153,11 +162,11 @@ EXTERN_G;
 // This saves 60K of memory in one place, and possibly there are other large savings too.
 // The following older comment dates back to 2003/inception and I don't remember its exact intent,
 // but there is no current storage of mouse message constants in scan code variables:
-// OLD: Although only need 9 bits for compressed and 16 for uncompressed scan code, use a full 32 bits 
+// OLD: Although only need 9 bits for compressed and 16 for uncompressed scan code, use a full 32 bits
 // so that mouse messages (WPARAM) can be stored as scan codes.  Formerly USHORT (which is always 16-bit).
 typedef USHORT sc_type; // Scan code.
-typedef UCHAR vk_type;  // Virtual key.
-typedef UINT mod_type;  // Standard Windows modifier type for storing MOD_CONTROL, MOD_WIN, MOD_ALT, MOD_SHIFT.
+typedef UCHAR vk_type;	// Virtual key.
+typedef UINT mod_type;	// Standard Windows modifier type for storing MOD_CONTROL, MOD_WIN, MOD_ALT, MOD_SHIFT.
 
 // The maximum number of virtual keys and scan codes that can ever exist.
 // As of WinXP, these are absolute limits, except for scan codes for which there might conceivably
@@ -188,7 +197,6 @@ typedef UCHAR modLR_type; // Only the left-right win/alt/ctrl/shift rather than 
 #define MODLR_MASK (MODLR_LMASK | MODLR_RMASK)
 #define MODLR_STRING _T("<^>^<!>!<+>+<#>#")
 
-
 struct CachedLayoutType
 {
 	HKL hkl;
@@ -207,13 +215,21 @@ struct key_to_sc_type // Map key names to scan codes.
 	sc_type sc;
 };
 
-enum KeyStateTypes {KEYSTATE_LOGICAL, KEYSTATE_PHYSICAL, KEYSTATE_TOGGLE}; // For use with GetKeyJoyState(), etc.
-enum KeyEventTypes {KEYDOWN, KEYUP, KEYDOWNANDUP};
+enum KeyStateTypes
+{
+	KEYSTATE_LOGICAL,
+	KEYSTATE_PHYSICAL,
+	KEYSTATE_TOGGLE
+}; // For use with GetKeyJoyState(), etc.
+enum KeyEventTypes
+{
+	KEYDOWN,
+	KEYUP,
+	KEYDOWNANDUP
+};
 
 void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND aTargetWindow = NULL);
-void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModifiersLRPersistent
-	, int aRepeatCount, KeyEventTypes aEventType, modLR_type aKeyAsModifiersLR, HWND aTargetWindow
-	, int aX = COORD_UNSPECIFIED, int aY = COORD_UNSPECIFIED, bool aMoveOffset = false);
+void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModifiersLRPersistent, int aRepeatCount, KeyEventTypes aEventType, modLR_type aKeyAsModifiersLR, HWND aTargetWindow, int aX = COORD_UNSPECIFIED, int aY = COORD_UNSPECIFIED, bool aMoveOffset = false);
 void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR);
 void SendASC(LPCTSTR aAscii);
 
@@ -244,14 +260,13 @@ struct PlaybackEvent
 };
 LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam);
 
-
 // Below uses a pseudo-random value.  It's best that this be constant so that if multiple instances
 // of the app are running, they will all ignore each other's keyboard & mouse events.  Also, a value
 // close to UINT_MAX might be a little better since it's might be less likely to be used as a pointer
 // value by any apps that send keybd events whose ExtraInfo is really a pointer value.
 #define KEY_IGNORE 0xFFC3D44F
-#define KEY_PHYS_IGNORE (KEY_IGNORE - 1)  // Same as above but marked as physical for other instances of the hook.
-#define KEY_IGNORE_ALL_EXCEPT_MODIFIER (KEY_IGNORE - 2)  // Non-physical and ignored only if it's not a modifier.
+#define KEY_PHYS_IGNORE (KEY_IGNORE - 1)				// Same as above but marked as physical for other instances of the hook.
+#define KEY_IGNORE_ALL_EXCEPT_MODIFIER (KEY_IGNORE - 2) // Non-physical and ignored only if it's not a modifier.
 // Same as KEY_IGNORE_ALL_EXCEPT_MODIFIER, but only ignored by Hotkeys & Hotstrings at InputLevel LEVEL and below.
 // The levels are set up to use negative offsets from KEY_IGNORE_ALL_EXCEPT_MODIFIER so that we can leave
 // the values above unchanged and have KEY_IGNORE_LEVEL(0) == KEY_IGNORE_ALL_EXCEPT_MODIFIER.
@@ -271,7 +286,6 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam);
 // block it from the active window to avoid unwanted side-effects:
 #define KEY_BLOCK_THIS (KEY_IGNORE + 1)
 
-
 // The default in the below is KEY_IGNORE_ALL_EXCEPT_MODIFIER, which causes standard calls to
 // KeyEvent() to update g_modifiersLR_logical_non_ignored the same way it updates g_modifiersLR_logical.
 // This is done because only the Send command has a realistic chance of interfering with (or being
@@ -284,27 +298,24 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam);
 // 2) The wrong hotkey firing because Send has temporarily put a modifier into effect and (once again)
 //    the user is holding down the hotkey to auto-repeat it.  If the Send's temp-down modifier happens
 //    to make the hotkey suffix match a different set of modifiers, the wrong hotkey would fire.
-void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC = 0, HWND aTargetWindow = NULL
-	, bool aDoKeyDelay = false, DWORD aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER);
+void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC = 0, HWND aTargetWindow = NULL, bool aDoKeyDelay = false, DWORD aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER);
 void KeyEventMenuMask(KeyEventTypes aEventType, DWORD aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER);
 
 ResultType PerformClick(LPTSTR aOptions);
-void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEventTypes &aEventType
-	, int &aRepeatCount, bool &aMoveOffset);
-FResult PerformMouse(ActionTypeType aActionType, optl<StrArg> aButton
-	, optl<int> aX1, optl<int> aY1, optl<int> aX2, optl<int> aY2
-	, optl<int> aSpeed, optl<StrArg> aOffsetMode, optl<int> aRepeatCount, optl<StrArg> aDownUp);
-void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY1, int aX2, int aY2
-	, int aRepeatCount, KeyEventTypes aEventType, int aSpeed, bool aMoveOffset);
+void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEventTypes &aEventType, int &aRepeatCount, bool &aMoveOffset);
+FResult PerformMouse(ActionTypeType aActionType, optl<StrArg> aButton, optl<int> aX1, optl<int> aY1, optl<int> aX2, optl<int> aY2, optl<int> aSpeed, optl<StrArg> aOffsetMode, optl<int> aRepeatCount, optl<StrArg> aDownUp);
+void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aRepeatCount, KeyEventTypes aEventType, int aSpeed, bool aMoveOffset);
 
 void MouseClickDrag(vk_type aVK // Which button.
-	, int aX1, int aY1, int aX2, int aY2, int aSpeed, bool aMoveOffset);
+					,
+					int aX1, int aY1, int aX2, int aY2, int aSpeed, bool aMoveOffset);
 void MouseClick(vk_type aVK // Which button.
-	, int aX, int aY, int aRepeatCount, int aSpeed, KeyEventTypes aEventType, bool aMoveOffset = false);
+				,
+				int aX, int aY, int aRepeatCount, int aSpeed, KeyEventTypes aEventType, bool aMoveOffset = false);
 void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffset);
 void MouseEvent(DWORD aEventFlags, DWORD aData, DWORD aX = COORD_UNSPECIFIED, DWORD aY = COORD_UNSPECIFIED);
 
-#define MSG_OFFSET_MOUSE_MOVE 0x80000000  // Bitwise flag, should be near/at high-order bit to avoid overlap messages.
+#define MSG_OFFSET_MOUSE_MOVE 0x80000000 // Bitwise flag, should be near/at high-order bit to avoid overlap messages.
 void PutKeybdEventIntoArray(modLR_type aKeyAsModifiersLR, vk_type aVK, sc_type aSC, DWORD aEventFlags, DWORD aExtraInfo);
 void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY);
 ResultType ExpandEventArray();
@@ -322,9 +333,8 @@ void SetKeyHistoryMax(int aMax);
 ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue);
 FResult SetToggleState(vk_type aVK, ToggleValueType &ForceLock, optl<StrArg> aToggleText);
 
-#define STD_MODS_TO_DISGUISE (MOD_LALT|MOD_RALT|MOD_LWIN|MOD_RWIN)
-void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, HWND aTargetWindow
-	, bool aDisguiseDownWinAlt, bool aDisguiseUpWinAlt, DWORD aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER);
+#define STD_MODS_TO_DISGUISE (MOD_LALT | MOD_RALT | MOD_LWIN | MOD_RWIN)
+void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, HWND aTargetWindow, bool aDisguiseDownWinAlt, bool aDisguiseUpWinAlt, DWORD aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER);
 modLR_type GetModifierLRState(bool aExplicitlyGet = false);
 
 #define IsKeyDown(vk) (GetKeyState(vk) & 0x8000)
@@ -349,12 +359,10 @@ LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback = t
 LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout = NULL);
 sc_type TextToSC(LPCTSTR aText, bool *aSpecifiedByNumber = NULL);
-vk_type TextToVK(LPCTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
-	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
+vk_type TextToVK(LPCTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
 vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout, bool aEnableAZFallback = true);
 bool TextToVKandSC(LPCTSTR aText, vk_type &aVK, sc_type &aSC, modLR_type *pModifiersLR = NULL, HKL aKeybdLayout = GetKeyboardLayout(0));
-vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
-	, bool aUpdatePersistent);
+vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR, bool aUpdatePersistent);
 
 LPTSTR GetKeyName(vk_type aVK, sc_type aSC, LPTSTR aBuf, int aBufSize, LPTSTR aDefault = _T("not found"));
 sc_type vk_to_sc(vk_type aVK, bool aReturnSecondary = false);
@@ -362,8 +370,7 @@ vk_type sc_to_vk(sc_type aSC);
 
 inline bool IsMouseVK(vk_type aVK)
 {
-	return aVK >= VK_LBUTTON && aVK <= VK_XBUTTON2 && aVK != VK_CANCEL
-		|| aVK >= VK_NEW_MOUSE_FIRST && aVK <= VK_NEW_MOUSE_LAST;
+	return aVK >= VK_LBUTTON && aVK <= VK_XBUTTON2 && aVK != VK_CANCEL || aVK >= VK_NEW_MOUSE_FIRST && aVK <= VK_NEW_MOUSE_LAST;
 }
 
 inline bool IsNeutralModifierVK(vk_type aVK)

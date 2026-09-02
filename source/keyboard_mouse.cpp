@@ -16,12 +16,11 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "keyboard_mouse.h"
-#include "globaldata.h" // for g->KeyDelay
+#include "globaldata.h"	 // for g->KeyDelay
 #include "application.h" // for MsgSleep()
-#include "util.h"  // for strlicmp()
-#include "window.h" // for IsWindowHung()
+#include "util.h"		 // for strlicmp()
+#include "window.h"		 // for IsWindowHung()
 #include "abi.h"
-
 
 // Added for v1.0.25.  Search on sPrevEventType for more comments:
 thread_local static KeyEventTypes sPrevEventType;
@@ -35,27 +34,26 @@ thread_local static modLR_type sModifiersLR_persistent = 0; // Tracks this scrip
 thread_local static modLR_type sModifiersLR_remapped = 0;
 
 // v1.0.44.03: Below supports multiple keyboard layouts better by having script adapt to active window's layout.
-#define MAX_CACHED_LAYOUTS 10  // Hard to imagine anyone using more languages/layouts than this, but even if they do it will still work; performance would just be a little worse due to being uncached.
+#define MAX_CACHED_LAYOUTS 10 // Hard to imagine anyone using more languages/layouts than this, but even if they do it will still work; performance would just be a little worse due to being uncached.
 thread_local static CachedLayoutType sCachedLayout[MAX_CACHED_LAYOUTS] = {{0}};
-thread_local static HKL sTargetKeybdLayout;           // Set by SendKeys() for use by the functions it calls directly and indirectly.
+thread_local static HKL sTargetKeybdLayout;			  // Set by SendKeys() for use by the functions it calls directly and indirectly.
 thread_local static ResultType sTargetLayoutHasAltGr; //
 
 // v1.0.43: Support for SendInput() and journal-playback hook:
-#define MAX_INITIAL_EVENTS_SI 500UL  // sizeof(INPUT) == 28 as of 2006. Since Send is called so often, and since most Sends are short, reducing the load on the stack is also a deciding factor for these.
-#define MAX_INITIAL_EVENTS_PB 1500UL // sizeof(PlaybackEvent) == 8, so more events are justified before resorting to malloc().
-thread_local static LPINPUT sEventSI;        // No init necessary.  An array that's allocated/deallocated by SendKeys().
+#define MAX_INITIAL_EVENTS_SI 500UL	  // sizeof(INPUT) == 28 as of 2006. Since Send is called so often, and since most Sends are short, reducing the load on the stack is also a deciding factor for these.
+#define MAX_INITIAL_EVENTS_PB 1500UL  // sizeof(PlaybackEvent) == 8, so more events are justified before resorting to malloc().
+thread_local static LPINPUT sEventSI; // No init necessary.  An array that's allocated/deallocated by SendKeys().
 thread_local static PlaybackEvent *&sEventPB = (PlaybackEvent *&)sEventSI;
 thread_local static UINT sEventCount, sMaxEvents; // Number of items in the above arrays and the current array capacity.
 thread_local static UINT sCurrentEvent;
 thread_local static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.
-thread_local static POINT sSendInputCursorPos;    // Tracks/predicts cursor position as SendInput array is built.
+thread_local static POINT sSendInputCursorPos;	  // Tracks/predicts cursor position as SendInput array is built.
 thread_local static HookType sHooksToRemoveDuringSendInput;
 thread_local static SendModes sSendMode = SM_EVENT; // Whether a SendInput or Hook array is currently being constructed.
-thread_local static bool sAbortArraySend;         // No init needed.
-thread_local static bool sFirstCallForThisEvent;  //
-thread_local static bool sInBlindMode;            //
-thread_local static DWORD sThisEventTime;         //
-
+thread_local static bool sAbortArraySend;			// No init needed.
+thread_local static bool sFirstCallForThisEvent;	//
+thread_local static bool sInBlindMode;				//
+thread_local static DWORD sThisEventTime;			//
 
 void DisguiseWinAltIfNeeded(vk_type aVK)
 // For v1.0.25, the following situation is fixed by the code below: If LWin or LAlt
@@ -81,12 +79,9 @@ void DisguiseWinAltIfNeeded(vk_type aVK)
 	if (sPrevEventType == KEYDOWN && sPrevEventModifierDown != aVK && !sInBlindMode
 		// SendPlay mode can't display Start Menu, so no need for disguise keystrokes (such keystrokes might cause
 		// unwanted effects in certain games):
-		&& ((aVK == VK_LWIN || aVK == VK_RWIN) && (sPrevVK == VK_LWIN || sPrevVK == VK_RWIN) && sSendMode != SM_PLAY
-			|| (aVK == VK_LMENU || (aVK == VK_RMENU && sTargetLayoutHasAltGr != CONDITION_TRUE)) && (sPrevVK == VK_LMENU || sPrevVK == VK_RMENU)))
+		&& ((aVK == VK_LWIN || aVK == VK_RWIN) && (sPrevVK == VK_LWIN || sPrevVK == VK_RWIN) && sSendMode != SM_PLAY || (aVK == VK_LMENU || (aVK == VK_RMENU && sTargetLayoutHasAltGr != CONDITION_TRUE)) && (sPrevVK == VK_LMENU || sPrevVK == VK_RMENU)))
 		KeyEventMenuMask(KEYDOWNANDUP); // Disguise it to suppress Start Menu or prevent activation of active window's menu bar.
 }
-
-
 
 // moved from SendKeys
 void SendUnicodeChar(wchar_t aChar, modLR_type aModifiers)
@@ -104,12 +99,12 @@ void SendUnicodeChar(wchar_t aChar, modLR_type aModifiers)
 		PutKeybdEventIntoArray(0, 0, aChar, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, KEY_IGNORE_LEVEL(g->SendLevel));
 		return;
 	}
-	//else caller has ensured sSendMode is SM_EVENT. In that mode, events are sent one at a time,
-	// so it is safe to immediately call SendInput(). SM_PLAY is not supported; for simplicity,
-	// SendASC() is called instead of this function. Although this means Unicode chars probably
-	// won't work, it seems better than sending chars out of order. One possible alternative could
-	// be to "flush" the event array, but since SendInput and SendEvent are probably much more common,
-	// this is left for a future version.
+	// else caller has ensured sSendMode is SM_EVENT. In that mode, events are sent one at a time,
+	//  so it is safe to immediately call SendInput(). SM_PLAY is not supported; for simplicity,
+	//  SendASC() is called instead of this function. Although this means Unicode chars probably
+	//  won't work, it seems better than sending chars out of order. One possible alternative could
+	//  be to "flush" the event array, but since SendInput and SendEvent are probably much more common,
+	//  this is left for a future version.
 
 	INPUT u_input[2];
 
@@ -120,7 +115,7 @@ void SendUnicodeChar(wchar_t aChar, modLR_type aModifiers)
 	u_input[0].ki.time = 0;
 	// L25: Set dwExtraInfo to ensure AutoHotkey ignores the event; otherwise it may trigger a SCxxx hotkey (where xxx is u_code).
 	u_input[0].ki.dwExtraInfo = KEY_IGNORE_LEVEL(g->SendLevel);
-	
+
 	u_input[1].type = INPUT_KEYBOARD;
 	u_input[1].ki.wVk = 0;
 	u_input[1].ki.wScan = aChar;
@@ -130,8 +125,6 @@ void SendUnicodeChar(wchar_t aChar, modLR_type aModifiers)
 
 	SendInput(2, u_input, sizeof(INPUT));
 }
-
-
 
 void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND aTargetWindow)
 // The aKeys string must be modifiable (not constant), since for performance reasons,
@@ -164,13 +157,26 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 			modLR_type mod;
 			switch (*aKeys)
 			{
-			case '<': mod_mask = MODLR_LMASK; continue;
-			case '>': mod_mask = MODLR_RMASK; continue;
-			case '^': mod = MOD_LCONTROL|MOD_RCONTROL; break;
-			case '+': mod = MOD_LSHIFT|MOD_RSHIFT; break;
-			case '!': mod = MOD_LALT|MOD_RALT; break;
-			case '#': mod = MOD_LWIN|MOD_RWIN; break;
-			case '\0': return; // Just ignore the error.
+			case '<':
+				mod_mask = MODLR_LMASK;
+				continue;
+			case '>':
+				mod_mask = MODLR_RMASK;
+				continue;
+			case '^':
+				mod = MOD_LCONTROL | MOD_RCONTROL;
+				break;
+			case '+':
+				mod = MOD_LSHIFT | MOD_RSHIFT;
+				break;
+			case '!':
+				mod = MOD_LALT | MOD_RALT;
+				break;
+			case '#':
+				mod = MOD_LWIN | MOD_RWIN;
+				break;
+			case '\0':
+				return; // Just ignore the error.
 			}
 			mods_excluded_from_blind |= (mod & mod_mask);
 			mod_mask = MODLR_MASK; // Reset for the next modifier.
@@ -194,8 +200,8 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 		// just designed to add a lot of value for typical usage because SendInput is preferred due to it
 		// being considerably faster than SendPlay, especially for long replacements when the CPU is under
 		// heavy load.
-		if (   SystemHasAnotherKeybdHook() // This function has been benchmarked to ensure it doesn't yield our timeslice, etc.  200 calls take 0ms according to tick-count, even when CPU is maxed.
-			|| !aSendRaw && SystemHasAnotherMouseHook() && tcscasestr(aKeys, _T("{Click"))   ) // Ordered for short-circuit boolean performance.  v1.0.43.09: Fixed to be strcasestr vs. !strcasestr
+		if (SystemHasAnotherKeybdHook()														// This function has been benchmarked to ensure it doesn't yield our timeslice, etc.  200 calls take 0ms according to tick-count, even when CPU is maxed.
+			|| !aSendRaw && SystemHasAnotherMouseHook() && tcscasestr(aKeys, _T("{Click"))) // Ordered for short-circuit boolean performance.  v1.0.43.09: Fixed to be strcasestr vs. !strcasestr
 		{
 			// Need to detect in advance what type of array to build (for performance and code size).  That's why
 			// it done this way, and here are the comments about it:
@@ -224,7 +230,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 				g.KeyDelay = -1; // Above line must be done before this one.
 			}
 		}
-		else // SendInput is available and no other impacting hooks are obviously present on the system, so use SendInput unconditionally.
+		else						  // SendInput is available and no other impacting hooks are obviously present on the system, so use SendInput unconditionally.
 			aSendModeOrig = SM_INPUT; // Resolve early so that other sections don't have to consider SM_INPUT_FALLBACK_TO_PLAY a valid value.
 	}
 
@@ -233,9 +239,9 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	// 1) For ControlSend, GetModifierLRState() might be more accurate if the threads are attached beforehand.
 	// 2) Determines sTargetKeybdLayout and sTargetLayoutHasAltGr early (for maintainability).
 	bool threads_are_attached = false; // Set default.
-	DWORD keybd_layout_thread = 0;     //
-	DWORD target_thread; // Doesn't need init.
-	if (aTargetWindow) // Caller has ensured this is NULL for SendInput and SendPlay modes.
+	DWORD keybd_layout_thread = 0;	   //
+	DWORD target_thread;			   // Doesn't need init.
+	if (aTargetWindow)				   // Caller has ensured this is NULL for SendInput and SendPlay modes.
 	{
 		if ((target_thread = GetWindowThreadProcessId(aTargetWindow, NULL)) // Assign.
 			&& target_thread != g_MainThreadID && !IsWindowHung(aTargetWindow))
@@ -243,7 +249,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 			threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;
 			keybd_layout_thread = target_thread; // Testing shows that ControlSend benefits from the adapt-to-layout technique too.
 		}
-		//else no target thread, or it's our thread, or it's hung; so keep keybd_layout_thread at its default.
+		// else no target thread, or it's our thread, or it's hung; so keep keybd_layout_thread at its default.
 	}
 	else
 	{
@@ -254,13 +260,13 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 		// effect for all Sends because waiting for an "L" keystroke to be sent would be too late since the
 		// Windows would have already been artificially released by then, so IsKeyDownAsync() wouldn't be
 		// able to detect when the user physically releases the key.
-		if (   (g_script->mThisHotkeyModifiersLR & (MOD_LWIN|MOD_RWIN)) // Limit the scope to only those hotkeys that have a Win modifier, since anything outside that scope hasn't been fully analyzed.
+		if ((g_script->mThisHotkeyModifiersLR & (MOD_LWIN | MOD_RWIN))		 // Limit the scope to only those hotkeys that have a Win modifier, since anything outside that scope hasn't been fully analyzed.
 			&& (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)50 // Ensure g_script->mThisHotkeyModifiersLR is up-to-date enough to be reliable.
-			&& aSendModeOrig != SM_PLAY // SM_PLAY is reported to be incapable of locking the computer.
-			&& !sInBlindMode // The philosophy of blind-mode is that the script should have full control, so don't do any waiting during blind mode.
-			&& aSendRaw != SCM_RAW_TEXT // {Text} mode does not trigger Win+L.
-			&& GetCurrentThreadId() == g_MainThreadID // Exclude the hook thread because it isn't allowed to call anything like MsgSleep, nor are any calls from the hook thread within the understood/analyzed scope of this workaround.
-			)
+			&& aSendModeOrig != SM_PLAY										 // SM_PLAY is reported to be incapable of locking the computer.
+			&& !sInBlindMode												 // The philosophy of blind-mode is that the script should have full control, so don't do any waiting during blind mode.
+			&& aSendRaw != SCM_RAW_TEXT										 // {Text} mode does not trigger Win+L.
+			&& GetCurrentThreadId() == g_MainThreadID						 // Exclude the hook thread because it isn't allowed to call anything like MsgSleep, nor are any calls from the hook thread within the understood/analyzed scope of this workaround.
+		)
 		{
 			bool wait_for_win_key_release;
 			if (aSendRaw)
@@ -277,21 +283,21 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 				{
 					// Encountering a #L seems too rare, and the consequences too mild (or nonexistent), to
 					// justify the following commented-out section:
-					//if (L_pos > aKeys && L_pos[-1] == '#') // A simple check; it won't detect things like #+L.
+					// if (L_pos > aKeys && L_pos[-1] == '#') // A simple check; it won't detect things like #+L.
 					//	brace_pos = L_pos + 1;
-					//else
+					// else
 					if (!(brace_pos = StrChrAny(L_pos + 1, _T("{}"))) || *brace_pos == '{') // See comment below.
 					{
 						wait_for_win_key_release = true;
 						break;
 					}
-					//else it found a '}' without a preceding '{', which means this "L" is inside braces.
-					// For simplicity, ignore such L's (probably not a perfect check, but seems worthwhile anyway).
+					// else it found a '}' without a preceding '{', which means this "L" is inside braces.
+					//  For simplicity, ignore such L's (probably not a perfect check, but seems worthwhile anyway).
 				}
 			}
 			if (wait_for_win_key_release)
 				while (IsKeyDownAsync(VK_LWIN) || IsKeyDownAsync(VK_RWIN)) // Even if the keyboard hook is installed, it seems best to use IsKeyDownAsync() vs. g_PhysicalKeyState[] because it's more likely to produce consistent behavior.
-					SLEEP_WITHOUT_INTERRUPTION(INTERVAL_UNSPECIFIED); // Seems best not to allow other threads to launch, for maintainability and because SendKeys() isn't designed to be interruptible.
+					SLEEP_WITHOUT_INTERRUPTION(INTERVAL_UNSPECIFIED);	   // Seems best not to allow other threads to launch, for maintainability and because SendKeys() isn't designed to be interruptible.
 		}
 
 		// v1.0.44.03: The following change is meaningful only to people who use more than one keyboard layout.
@@ -305,7 +311,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 		keybd_layout_thread = GetFocusedCtrlThread();
 	}
 	sTargetKeybdLayout = GetKeyboardLayout(keybd_layout_thread); // If keybd_layout_thread==0, this will get our thread's own layout, which seems like the best/safest default.
-	sTargetLayoutHasAltGr = LayoutHasAltGr(sTargetKeybdLayout);  // Note that WM_INPUTLANGCHANGEREQUEST is not monitored by MsgSleep for the purpose of caching our thread's keyboard layout.  This is because it would be unreliable if another msg pump such as MsgBox is running.  Plus it hardly helps perf. at all, and hurts maintainability.
+	sTargetLayoutHasAltGr = LayoutHasAltGr(sTargetKeybdLayout);	 // Note that WM_INPUTLANGCHANGEREQUEST is not monitored by MsgSleep for the purpose of caching our thread's keyboard layout.  This is because it would be unreliable if another msg pump such as MsgBox is running.  Plus it hardly helps perf. at all, and hurts maintainability.
 
 	// Below is now called with "true" so that the hook's modifier state will be corrected (if necessary)
 	// prior to every send.
@@ -326,7 +332,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 		// Since hook is installed, use its more reliable tracking to determine which
 		// modifiers are down.
 		mods_down_physically_orig = g_modifiersLR_physical;
-		//mods_down_physically_and_logically = g_modifiersLR_physical & g_modifiersLR_logical; // intersect
+		// mods_down_physically_and_logically = g_modifiersLR_physical & g_modifiersLR_logical; // intersect
 		mods_down_physically_but_not_logically_orig = g_modifiersLR_physical & ~g_modifiersLR_logical;
 	}
 	else // Use best-guess instead.
@@ -335,13 +341,13 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 		// DWORD subtraction still gives the right answer as long as g_script->mThisHotkeyStartTime
 		// itself isn't more than about 49 days ago:
 		if ((GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // Elapsed time < timeout-value
-			mods_down_physically_orig = mods_current & g_script->mThisHotkeyModifiersLR; // Bitwise AND is set intersection.
+			mods_down_physically_orig = mods_current & g_script->mThisHotkeyModifiersLR;		// Bitwise AND is set intersection.
 		else
 			// Since too much time as passed since the user pressed the hotkey, it seems best,
 			// based on the action that will occur below, to assume that no hotkey modifiers
 			// are physically down:
 			mods_down_physically_orig = 0;
-		//mods_down_physically_and_logically = mods_down_physically_orig;
+		// mods_down_physically_and_logically = mods_down_physically_orig;
 		mods_down_physically_but_not_logically_orig = 0; // There's no way of knowing, so assume none.
 	}
 
@@ -349,7 +355,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	// logically down rather than physically (perhaps from a prior command such as
 	// `Send "{CtrlDown}"`.  Since there's no way to be sure without the keyboard hook
 	// or some driver-level monitoring, it seems best to assume that they are logically
-	// vs. physically down.  
+	// vs. physically down.
 	// persistent_modifiers_for_this_SendKeys contains the modifiers that we will not
 	// attempt to change (e.g. `Send "A"` will not release LWin before sending "A" if
 	// this value indicates that LWin is down).
@@ -372,7 +378,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	// being persistent if the user happens to physically hold Ctrl (for any purpose).
 	// For example, when Send "{Shift Down}" and *KEY::Send "a" are used in combination,
 	// the result should be "A" regardless of whether KEY = Shift.
-	//sModifiersLR_persistent &= mods_current & ~mods_down_physically_and_logically;
+	// sModifiersLR_persistent &= mods_current & ~mods_down_physically_and_logically;
 	sModifiersLR_persistent &= mods_current;
 	modLR_type persistent_modifiers_for_this_SendKeys;
 	modLR_type mods_released_for_selective_blind = 0;
@@ -412,8 +418,8 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	// Remember that apps like MS Word have an auto-correct feature that might make it
 	// wrongly seem that the turning off of Capslock below needs a Sleep(0) to take effect.
 	prior_capslock_state = g.StoreCapslockMode && !sInBlindMode && aSendRaw != SCM_RAW_TEXT
-		? ToggleKeyState(VK_CAPITAL, TOGGLED_OFF)
-		: TOGGLE_INVALID; // In blind mode, don't do store capslock (helps remapping and also adds flexibility).
+							   ? ToggleKeyState(VK_CAPITAL, TOGGLED_OFF)
+							   : TOGGLE_INVALID; // In blind mode, don't do store capslock (helps remapping and also adds flexibility).
 
 	// sSendMode must be set only after setting Capslock state above, because the hook method
 	// is incapable of changing the on/off state of toggleable keys like Capslock.
@@ -440,8 +446,7 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	}
 
 	bool blockinput_prev = g_BlockInput;
-	bool do_selective_blockinput = (g_BlockInputMode == TOGGLE_SEND || g_BlockInputMode == TOGGLE_SENDANDMOUSE)
-		&& !sSendMode && !aTargetWindow;
+	bool do_selective_blockinput = (g_BlockInputMode == TOGGLE_SEND || g_BlockInputMode == TOGGLE_SENDANDMOUSE) && !sSendMode && !aTargetWindow;
 	if (do_selective_blockinput)
 		OurBlockInput(true); // Turn it on unconditionally even if it was on, since Ctrl-Alt-Del might have disabled it.
 
@@ -459,324 +464,324 @@ void SendKeys(LPCTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWN
 	KeyEventTypes event_type;
 	int repeat_count, click_x, click_y;
 	bool move_offset;
-	enum { KEYDOWN_TEMP = 0, KEYDOWN_PERSISTENT, KEYDOWN_REMAP } key_down_type;
+	enum
+	{
+		KEYDOWN_TEMP = 0,
+		KEYDOWN_PERSISTENT,
+		KEYDOWN_REMAP
+	} key_down_type;
 	DWORD placeholder;
 
-	LONG_OPERATION_INIT  // Needed even for SendInput/Play.
+	LONG_OPERATION_INIT // Needed even for SendInput/Play.
 
-	for (; *aKeys; ++aKeys, sPrevEventModifierDown = this_event_modifier_down)
+		for (; *aKeys; ++aKeys, sPrevEventModifierDown = this_event_modifier_down)
 	{
 		this_event_modifier_down = 0; // Set default for this iteration, overridden selectively below.
 		if (!sSendMode)
 			LONG_OPERATION_UPDATE_FOR_SENDKEYS // This does not measurably affect the performance of SendPlay/Event.
 
-		if (!aSendRaw && _tcschr(_T("^+!#{}"), *aKeys))
-		{
-			switch (*aKeys)
+				if (!aSendRaw && _tcschr(_T("^+!#{}"), *aKeys))
 			{
-			case '^':
-				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LCONTROL|MOD_RCONTROL)))
-					mods_for_next_key |= MOD_LCONTROL;
-				// else don't add it, because the value of mods_for_next_key may also used to determine
-				// which keys to release after the key to which this modifier applies is sent.
-				// We don't want persistent modifiers to ever be released because that's how
-				// AutoIt2 behaves and it seems like a reasonable standard.
-				continue;
-			case '+':
-				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LSHIFT|MOD_RSHIFT)))
-					mods_for_next_key |= MOD_LSHIFT;
-				continue;
-			case '!':
-				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LALT|MOD_RALT)))
-					mods_for_next_key |= MOD_LALT;
-				continue;
-			case '#':
-				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LWIN|MOD_RWIN)))
-					mods_for_next_key |= MOD_LWIN;
-				continue;
-			case '}': continue;  // Important that these be ignored.  Be very careful about changing this, see below.
-			case '{':
-			{
-				if (   !(end_pos = _tcschr(aKeys + 1, '}'))   ) // Ignore it and due to rarity, don't reset mods_for_next_key.
-					continue; // This check is relied upon by some things below that assume a '}' is present prior to the terminator.
-				aKeys = omit_leading_whitespace(aKeys + 1); // v1.0.43: Skip leading whitespace inside the braces to be more flexible.
-				if (   !(key_text_length = end_pos - aKeys)   )
+				switch (*aKeys)
 				{
-					if (end_pos[1] == '}')
+				case '^':
+					if (!(persistent_modifiers_for_this_SendKeys & (MOD_LCONTROL | MOD_RCONTROL)))
+						mods_for_next_key |= MOD_LCONTROL;
+					// else don't add it, because the value of mods_for_next_key may also used to determine
+					// which keys to release after the key to which this modifier applies is sent.
+					// We don't want persistent modifiers to ever be released because that's how
+					// AutoIt2 behaves and it seems like a reasonable standard.
+					continue;
+				case '+':
+					if (!(persistent_modifiers_for_this_SendKeys & (MOD_LSHIFT | MOD_RSHIFT)))
+						mods_for_next_key |= MOD_LSHIFT;
+					continue;
+				case '!':
+					if (!(persistent_modifiers_for_this_SendKeys & (MOD_LALT | MOD_RALT)))
+						mods_for_next_key |= MOD_LALT;
+					continue;
+				case '#':
+					if (!(persistent_modifiers_for_this_SendKeys & (MOD_LWIN | MOD_RWIN)))
+						mods_for_next_key |= MOD_LWIN;
+					continue;
+				case '}':
+					continue; // Important that these be ignored.  Be very careful about changing this, see below.
+				case '{':
+				{
+					if (!(end_pos = _tcschr(aKeys + 1, '}')))	// Ignore it and due to rarity, don't reset mods_for_next_key.
+						continue;								// This check is relied upon by some things below that assume a '}' is present prior to the terminator.
+					aKeys = omit_leading_whitespace(aKeys + 1); // v1.0.43: Skip leading whitespace inside the braces to be more flexible.
+					if (!(key_text_length = end_pos - aKeys))
 					{
-						// The literal string "{}}" has been encountered, which is interpreted as a single "}".
-						++end_pos;
-						key_text_length = 1;
-					}
-					else if (IS_SPACE_OR_TAB(end_pos[1])) // v1.0.48: Support "{} down}", "{} downtemp}" and "{} up}".
-					{
-						next_word = omit_leading_whitespace(end_pos + 1);
-						if (   !_tcsnicmp(next_word, _T("Down"), 4) // "Down" or "DownTemp" (or likely enough).
-							|| !_tcsnicmp(next_word, _T("Up"), 2)   )
+						if (end_pos[1] == '}')
 						{
-							if (   !(end_pos = _tcschr(next_word, '}'))   ) // See comments at similar section above.
-								continue;
-							key_text_length = end_pos - aKeys; // This result must be non-zero due to the checks above.
+							// The literal string "{}}" has been encountered, which is interpreted as a single "}".
+							++end_pos;
+							key_text_length = 1;
 						}
-						else
-							goto brace_case_end;  // The loop's ++aKeys will now skip over the '}', ignoring it.
-					}
-					else // Empty braces {} were encountered (or all whitespace, but literal whitespace isn't sent).
-						goto brace_case_end;  // The loop's ++aKeys will now skip over the '}', ignoring it.
-				}
-
-				// Make a modifiable null-terminated copy to simplify comparisons etc.
-				if (key_text_length >= _countof(key_text))
-					goto brace_case_end; // Skip this unreasonably long (probably invalid) item.
-				tmemcpy(key_text, aKeys, key_text_length);
-				key_text[key_text_length] = '\0';
-
-				if (!_tcsnicmp(key_text, _T("Click"), 5))
-				{
-					ParseClickOptions(omit_leading_whitespace(key_text + 5), click_x, click_y, vk
-						, event_type, repeat_count, move_offset);
-					if (repeat_count < 1) // Allow {Click 100, 100, 0} to do a mouse-move vs. click (but modifiers like ^{Click..} aren't supported in this case.
-						MouseMove(click_x, click_y, placeholder, g.DefaultMouseSpeed, move_offset);
-					else // Use SendKey because it supports modifiers (e.g. ^{Click}) SendKey requires repeat_count>=1.
-						SendKey(vk, 0, mods_for_next_key, persistent_modifiers_for_this_SendKeys
-							, repeat_count, event_type, 0, aTargetWindow, click_x, click_y, move_offset);
-					goto brace_case_end; // This {} item completely handled, so move on to next.
-				}
-				else if (!_tcsicmp(key_text, _T("Raw"))) // This is used by auto-replace hotstrings too.
-				{
-					// As documented, there's no way to switch back to non-raw mode afterward since there's no
-					// correct way to support special (non-literal) strings such as {Raw Off} while in raw mode.
-					aSendRaw = SCM_RAW;
-					goto brace_case_end; // This {} item completely handled, so move on to next.
-				}
-				else if (!_tcsicmp(key_text, _T("Text"))) // Added in v1.1.27
-				{
-					aSendRaw = SCM_RAW_TEXT;
-					goto brace_case_end; // This {} item completely handled, so move on to next.
-				}
-
-				// Since above didn't "goto", this item isn't {Click}.
-				event_type = KEYDOWNANDUP;         // Set defaults.
-				repeat_count = 1;                  //
-				key_name_length = key_text_length; //
-
-				if (auto space_pos = StrChrAny(key_text, _T(" \t"))) // Assign. Also, it relies on the fact that {} key names contain no spaces.
-				{
-					*space_pos = '\0';  // Terminate here so that TextToVK() can properly resolve a single char.
-					key_name_length = space_pos - key_text; // Override the default value set above.
-					next_word = omit_leading_whitespace(space_pos + 1);
-					UINT next_word_length = (UINT)(end_pos - next_word);
-					if (next_word_length > 0)
-					{
-						if (!_tcsnicmp(next_word, _T("Down"), 4))
+						else if (IS_SPACE_OR_TAB(end_pos[1])) // v1.0.48: Support "{} down}", "{} downtemp}" and "{} up}".
 						{
-							event_type = KEYDOWN;
-							// v1.0.44.05: Added key_down_is_persistent (which is not initialized except here because
-							// it's only applicable when event_type==KEYDOWN).  It avoids the following problem:
-							// When a key is remapped to become a modifier (such as F1::Control), launching one of
-							// the script's own hotkeys via F1 would lead to bad side-effects if that hotkey uses
-							// the Send command. This is because the Send command assumes that any modifiers pressed
-							// down by the script itself (such as Control) are intended to stay down during all
-							// keystrokes generated by that script. To work around this, something like KeyWait F1
-							// would otherwise be needed. within any hotkey triggered by the F1 key.
-							if (!_tcsnicmp(next_word + 4, _T("Temp"), 4)) // "DownTemp" means non-persistent.
-								key_down_type = KEYDOWN_TEMP;
-							else if (toupper(next_word[4] == 'R')) // "DownR" means treated as a physical modifier (R = remap); i.e. not kept down during Send, but restored after Send (unlike Temp).
-								key_down_type = KEYDOWN_REMAP;
+							next_word = omit_leading_whitespace(end_pos + 1);
+							if (!_tcsnicmp(next_word, _T("Down"), 4) // "Down" or "DownTemp" (or likely enough).
+								|| !_tcsnicmp(next_word, _T("Up"), 2))
+							{
+								if (!(end_pos = _tcschr(next_word, '}'))) // See comments at similar section above.
+									continue;
+								key_text_length = end_pos - aKeys; // This result must be non-zero due to the checks above.
+							}
 							else
-								key_down_type = KEYDOWN_PERSISTENT;
+								goto brace_case_end; // The loop's ++aKeys will now skip over the '}', ignoring it.
 						}
-						else if (!_tcsicmp(next_word, _T("Up")))
-							event_type = KEYUP;
-						else
-							repeat_count = ATOI(next_word);
+						else					 // Empty braces {} were encountered (or all whitespace, but literal whitespace isn't sent).
+							goto brace_case_end; // The loop's ++aKeys will now skip over the '}', ignoring it.
+					}
+
+					// Make a modifiable null-terminated copy to simplify comparisons etc.
+					if (key_text_length >= _countof(key_text))
+						goto brace_case_end; // Skip this unreasonably long (probably invalid) item.
+					tmemcpy(key_text, aKeys, key_text_length);
+					key_text[key_text_length] = '\0';
+
+					if (!_tcsnicmp(key_text, _T("Click"), 5))
+					{
+						ParseClickOptions(omit_leading_whitespace(key_text + 5), click_x, click_y, vk, event_type, repeat_count, move_offset);
+						if (repeat_count < 1) // Allow {Click 100, 100, 0} to do a mouse-move vs. click (but modifiers like ^{Click..} aren't supported in this case.
+							MouseMove(click_x, click_y, placeholder, g.DefaultMouseSpeed, move_offset);
+						else // Use SendKey because it supports modifiers (e.g. ^{Click}) SendKey requires repeat_count>=1.
+							SendKey(vk, 0, mods_for_next_key, persistent_modifiers_for_this_SendKeys, repeat_count, event_type, 0, aTargetWindow, click_x, click_y, move_offset);
+						goto brace_case_end; // This {} item completely handled, so move on to next.
+					}
+					else if (!_tcsicmp(key_text, _T("Raw"))) // This is used by auto-replace hotstrings too.
+					{
+						// As documented, there's no way to switch back to non-raw mode afterward since there's no
+						// correct way to support special (non-literal) strings such as {Raw Off} while in raw mode.
+						aSendRaw = SCM_RAW;
+						goto brace_case_end; // This {} item completely handled, so move on to next.
+					}
+					else if (!_tcsicmp(key_text, _T("Text"))) // Added in v1.1.27
+					{
+						aSendRaw = SCM_RAW_TEXT;
+						goto brace_case_end; // This {} item completely handled, so move on to next.
+					}
+
+					// Since above didn't "goto", this item isn't {Click}.
+					event_type = KEYDOWNANDUP;		   // Set defaults.
+					repeat_count = 1;				   //
+					key_name_length = key_text_length; //
+
+					if (auto space_pos = StrChrAny(key_text, _T(" \t"))) // Assign. Also, it relies on the fact that {} key names contain no spaces.
+					{
+						*space_pos = '\0';						// Terminate here so that TextToVK() can properly resolve a single char.
+						key_name_length = space_pos - key_text; // Override the default value set above.
+						next_word = omit_leading_whitespace(space_pos + 1);
+						UINT next_word_length = (UINT)(end_pos - next_word);
+						if (next_word_length > 0)
+						{
+							if (!_tcsnicmp(next_word, _T("Down"), 4))
+							{
+								event_type = KEYDOWN;
+								// v1.0.44.05: Added key_down_is_persistent (which is not initialized except here because
+								// it's only applicable when event_type==KEYDOWN).  It avoids the following problem:
+								// When a key is remapped to become a modifier (such as F1::Control), launching one of
+								// the script's own hotkeys via F1 would lead to bad side-effects if that hotkey uses
+								// the Send command. This is because the Send command assumes that any modifiers pressed
+								// down by the script itself (such as Control) are intended to stay down during all
+								// keystrokes generated by that script. To work around this, something like KeyWait F1
+								// would otherwise be needed. within any hotkey triggered by the F1 key.
+								if (!_tcsnicmp(next_word + 4, _T("Temp"), 4)) // "DownTemp" means non-persistent.
+									key_down_type = KEYDOWN_TEMP;
+								else if (toupper(next_word[4] == 'R')) // "DownR" means treated as a physical modifier (R = remap); i.e. not kept down during Send, but restored after Send (unlike Temp).
+									key_down_type = KEYDOWN_REMAP;
+								else
+									key_down_type = KEYDOWN_PERSISTENT;
+							}
+							else if (!_tcsicmp(next_word, _T("Up")))
+								event_type = KEYUP;
+							else
+								repeat_count = ATOI(next_word);
 							// Above: If negative or zero, that is handled further below.
 							// There is no complaint for values <1 to support scripts that want to conditionally send
 							// zero keystrokes, e.g. Send {a %Count%}
+						}
 					}
-				}
 
-				TextToVKandSC(key_text, vk, sc, &mods_for_next_key, sTargetKeybdLayout);
+					TextToVKandSC(key_text, vk, sc, &mods_for_next_key, sTargetKeybdLayout);
 
-				if (repeat_count < 1)
-					goto brace_case_end; // Gets rid of one level of indentation. Well worth it.
+					if (repeat_count < 1)
+						goto brace_case_end; // Gets rid of one level of indentation. Well worth it.
 
-				if (vk || sc)
-				{
-					if (key_as_modifiersLR = KeyToModifiersLR(vk, sc)) // Assign
+					if (vk || sc)
+					{
+						if (key_as_modifiersLR = KeyToModifiersLR(vk, sc)) // Assign
+						{
+							if (!aTargetWindow)
+							{
+								if (event_type == KEYDOWN) // i.e. make {Shift down} have the same effect {ShiftDown}
+								{
+									this_event_modifier_down = vk;
+									if (key_down_type == KEYDOWN_PERSISTENT) // v1.0.44.05.
+										sModifiersLR_persistent |= key_as_modifiersLR;
+									else if (key_down_type == KEYDOWN_REMAP) // v1.1.27.00
+										sModifiersLR_remapped |= key_as_modifiersLR;
+									persistent_modifiers_for_this_SendKeys |= key_as_modifiersLR; // v1.0.44.06: Added this line to fix the fact that "DownTemp" should keep the key pressed down after the send.
+								}
+								else if (event_type == KEYUP) // *not* KEYDOWNANDUP, since that would be an intentional activation of the Start Menu or menu bar.
+								{
+									DisguiseWinAltIfNeeded(vk);
+									sModifiersLR_persistent &= ~key_as_modifiersLR;
+									sModifiersLR_remapped &= ~key_as_modifiersLR;
+									persistent_modifiers_for_this_SendKeys &= ~key_as_modifiersLR;
+									// Fix for v1.0.43: Also remove LControl if this key happens to be AltGr.
+									if (vk == VK_RMENU && sTargetLayoutHasAltGr == CONDITION_TRUE) // It is AltGr.
+										persistent_modifiers_for_this_SendKeys &= ~MOD_LCONTROL;
+								}
+								// else must never change sModifiersLR_persistent in response to KEYDOWNANDUP
+								// because that would break existing scripts.  This is because that same
+								// modifier key may have been pushed down via {ShiftDown} rather than "{Shift Down}".
+								// In other words, {Shift} should never undo the effects of a prior {ShiftDown}
+								// or {Shift down}.
+							}
+							// else don't add this event to sModifiersLR_persistent because it will not be
+							//  manifest via keybd_event.  Instead, it will done via less intrusively
+							//  (less interference with foreground window) via SetKeyboardState() and
+							//  PostMessage().  This change is for ControlSend in v1.0.21 and has been
+							//  documented.
+						}
+						// Below: sModifiersLR_persistent stays in effect (pressed down) even if the key
+						// being sent includes that same modifier.  Surprisingly, this is how AutoIt2
+						// behaves also, which is good.  Example: Send, {AltDown}!f  ; this will cause
+						// Alt to still be down after the command is over, even though F is modified
+						// by Alt.
+						SendKey(vk, sc, mods_for_next_key, persistent_modifiers_for_this_SendKeys, repeat_count, event_type, key_as_modifiersLR, aTargetWindow);
+					}
+
+					else if (key_name_length == 1) // No vk/sc means a char of length one is sent via special method.
+					{
+						// v1.0.40: SendKeySpecial sends only keybd_event keystrokes, not ControlSend style
+						// keystrokes.
+						// v1.0.43.07: Added check of event_type!=KEYUP, which causes something like Send {ð up} to
+						// do nothing if the curr. keyboard layout lacks such a key.  This is relied upon by remappings
+						// such as F1::ð (i.e. a destination key that doesn't have a VK, at least in English).
+						if (event_type != KEYUP) // In this mode, mods_for_next_key and event_type are ignored due to being unsupported.
+						{
+							if (aTargetWindow)
+							{
+								// Although MSDN says WM_CHAR uses UTF-16, it seems to really do automatic
+								// translation between ANSI and UTF-16; we rely on this for correct results:
+								for (int i = 0; i < repeat_count; ++i)
+									PostMessage(aTargetWindow, WM_CHAR, key_text[0], 0);
+							}
+							else
+								SendKeySpecial(key_text[0], repeat_count, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
+						}
+					}
+
+					else if (key_name_length > 1 && isdigit((UCHAR)*aKeys))
+					{
+						// Send('{timeout}')
+						if (sSendMode != SM_EVENT) // || (sSendMode == SM_INPUT && !SystemHasAnotherKeybdHook()))
+							PutKeybdEventIntoArray(0, 0, 0, 0, ATOI(aKeys));
+						else
+							SLEEP_WITHOUT_INTERRUPTION(ATOI(aKeys));
+					}
+
+					// See comment "else must never change sModifiersLR_persistent" above about why
+					// !aTargetWindow is used below:
+					else if (vk = TextToSpecial(key_text, key_text_length, event_type, persistent_modifiers_for_this_SendKeys, !aTargetWindow)) // Assign.
 					{
 						if (!aTargetWindow)
 						{
-							if (event_type == KEYDOWN) // i.e. make {Shift down} have the same effect {ShiftDown}
-							{
+							if (event_type == KEYDOWN)
 								this_event_modifier_down = vk;
-								if (key_down_type == KEYDOWN_PERSISTENT) // v1.0.44.05.
-									sModifiersLR_persistent |= key_as_modifiersLR;
-								else if (key_down_type == KEYDOWN_REMAP) // v1.1.27.00
-									sModifiersLR_remapped |= key_as_modifiersLR;
-								persistent_modifiers_for_this_SendKeys |= key_as_modifiersLR; // v1.0.44.06: Added this line to fix the fact that "DownTemp" should keep the key pressed down after the send.
-							}
-							else if (event_type == KEYUP) // *not* KEYDOWNANDUP, since that would be an intentional activation of the Start Menu or menu bar.
-							{
+							else // It must be KEYUP because TextToSpecial() never returns KEYDOWNANDUP.
 								DisguiseWinAltIfNeeded(vk);
-								sModifiersLR_persistent &= ~key_as_modifiersLR;
-								sModifiersLR_remapped &= ~key_as_modifiersLR;
-								persistent_modifiers_for_this_SendKeys &= ~key_as_modifiersLR;
-								// Fix for v1.0.43: Also remove LControl if this key happens to be AltGr.
-								if (vk == VK_RMENU && sTargetLayoutHasAltGr == CONDITION_TRUE) // It is AltGr.
-									persistent_modifiers_for_this_SendKeys &= ~MOD_LCONTROL;
-							}
-							// else must never change sModifiersLR_persistent in response to KEYDOWNANDUP
-							// because that would break existing scripts.  This is because that same
-							// modifier key may have been pushed down via {ShiftDown} rather than "{Shift Down}".
-							// In other words, {Shift} should never undo the effects of a prior {ShiftDown}
-							// or {Shift down}.
 						}
-						//else don't add this event to sModifiersLR_persistent because it will not be
-						// manifest via keybd_event.  Instead, it will done via less intrusively
-						// (less interference with foreground window) via SetKeyboardState() and
-						// PostMessage().  This change is for ControlSend in v1.0.21 and has been
-						// documented.
-					}
-					// Below: sModifiersLR_persistent stays in effect (pressed down) even if the key
-					// being sent includes that same modifier.  Surprisingly, this is how AutoIt2
-					// behaves also, which is good.  Example: Send, {AltDown}!f  ; this will cause
-					// Alt to still be down after the command is over, even though F is modified
-					// by Alt.
-					SendKey(vk, sc, mods_for_next_key, persistent_modifiers_for_this_SendKeys
-						, repeat_count, event_type, key_as_modifiersLR, aTargetWindow);
-				}
-
-				else if (key_name_length == 1) // No vk/sc means a char of length one is sent via special method.
-				{
-					// v1.0.40: SendKeySpecial sends only keybd_event keystrokes, not ControlSend style
-					// keystrokes.
-					// v1.0.43.07: Added check of event_type!=KEYUP, which causes something like Send {ð up} to
-					// do nothing if the curr. keyboard layout lacks such a key.  This is relied upon by remappings
-					// such as F1::ð (i.e. a destination key that doesn't have a VK, at least in English).
-					if (event_type != KEYUP) // In this mode, mods_for_next_key and event_type are ignored due to being unsupported.
-					{
-						if (aTargetWindow)
+						// Since we're here, repeat_count > 0.
+						// v1.0.42.04: A previous call to SendKey() or SendKeySpecial() might have left modifiers
+						// in the wrong state (e.g. Send +{F1}{ControlDown}).  Since modifiers can sometimes affect
+						// each other, make sure they're in the state intended by the user before beginning:
+						SetModifierLRState(persistent_modifiers_for_this_SendKeys, sSendMode ? sEventModifiersLR : GetModifierLRState(), aTargetWindow, false, false); // It also does DoKeyDelay(g->PressDuration).
+						for (int i = 0; i < repeat_count; ++i)
 						{
-							// Although MSDN says WM_CHAR uses UTF-16, it seems to really do automatic
-							// translation between ANSI and UTF-16; we rely on this for correct results:
-							for (int i = 0; i < repeat_count; ++i)
-								PostMessage(aTargetWindow, WM_CHAR, key_text[0], 0);
+							// Don't tell it to save & restore modifiers because special keys like this one
+							// should have maximum flexibility (i.e. nothing extra should be done so that the
+							// user can have more control):
+							KeyEvent(event_type, vk, 0, aTargetWindow, true);
+							if (!sSendMode)
+								LONG_OPERATION_UPDATE_FOR_SENDKEYS
+						}
+					}
+
+					else if (key_text_length > 4 && !_tcsicmp(key_text, _T("ASC")) && !aTargetWindow) // {ASC nnnnn}
+					{
+						// Include the trailing space in "ASC " to increase uniqueness (selectivity).
+						// Also, sending the ASC sequence to window doesn't work, so don't even try:
+						SendASC(next_word);
+						// Do this only once at the end of the sequence:
+						DoKeyDelay(); // It knows not to do the delay for SM_INPUT.
+					}
+
+					else if (key_text_length > 2 && !_tcsnicmp(key_text, _T("U+"), 2))
+					{
+						// L24: Send a unicode value as shown by Character Map.
+						UINT u_code = (UINT)_tcstol(key_text + 2, NULL, 16);
+						wchar_t wc1, wc2;
+						if (u_code >= 0x10000)
+						{
+							// Supplementary characters are encoded as UTF-16 and split into two messages.
+							u_code -= 0x10000;
+							wc1 = 0xd800 + ((u_code >> 10) & 0x3ff);
+							wc2 = 0xdc00 + (u_code & 0x3ff);
 						}
 						else
-							SendKeySpecial(key_text[0], repeat_count, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
-					}
-				}
-
-				else if (key_name_length > 1 && isdigit((UCHAR)*aKeys))
-				{
-					// Send('{timeout}')
-					if (sSendMode != SM_EVENT) // || (sSendMode == SM_INPUT && !SystemHasAnotherKeybdHook()))
-						PutKeybdEventIntoArray(0, 0, 0, 0, ATOI(aKeys));
-					else
-						SLEEP_WITHOUT_INTERRUPTION(ATOI(aKeys));
-				}
-
-				// See comment "else must never change sModifiersLR_persistent" above about why
-				// !aTargetWindow is used below:
-				else if (vk = TextToSpecial(key_text, key_text_length, event_type
-					, persistent_modifiers_for_this_SendKeys, !aTargetWindow)) // Assign.
-				{
-					if (!aTargetWindow)
-					{
-						if (event_type == KEYDOWN)
-							this_event_modifier_down = vk;
-						else // It must be KEYUP because TextToSpecial() never returns KEYDOWNANDUP.
-							DisguiseWinAltIfNeeded(vk);
-					}
-					// Since we're here, repeat_count > 0.
-					// v1.0.42.04: A previous call to SendKey() or SendKeySpecial() might have left modifiers
-					// in the wrong state (e.g. Send +{F1}{ControlDown}).  Since modifiers can sometimes affect
-					// each other, make sure they're in the state intended by the user before beginning:
-					SetModifierLRState(persistent_modifiers_for_this_SendKeys
-						, sSendMode ? sEventModifiersLR : GetModifierLRState()
-						, aTargetWindow, false, false); // It also does DoKeyDelay(g->PressDuration).
-					for (int i = 0; i < repeat_count; ++i)
-					{
-						// Don't tell it to save & restore modifiers because special keys like this one
-						// should have maximum flexibility (i.e. nothing extra should be done so that the
-						// user can have more control):
-						KeyEvent(event_type, vk, 0, aTargetWindow, true);
-						if (!sSendMode)
-							LONG_OPERATION_UPDATE_FOR_SENDKEYS
-					}
-				}
-
-				else if (key_text_length > 4 && !_tcsicmp(key_text, _T("ASC")) && !aTargetWindow) // {ASC nnnnn}
-				{
-					// Include the trailing space in "ASC " to increase uniqueness (selectivity).
-					// Also, sending the ASC sequence to window doesn't work, so don't even try:
-					SendASC(next_word);
-					// Do this only once at the end of the sequence:
-					DoKeyDelay(); // It knows not to do the delay for SM_INPUT.
-				}
-
-				else if (key_text_length > 2 && !_tcsnicmp(key_text, _T("U+"), 2))
-				{
-					// L24: Send a unicode value as shown by Character Map.
-					UINT u_code = (UINT) _tcstol(key_text + 2, NULL, 16);
-					wchar_t wc1, wc2;
-					if (u_code >= 0x10000)
-					{
-						// Supplementary characters are encoded as UTF-16 and split into two messages.
-						u_code -= 0x10000;
-						wc1 = 0xd800 + ((u_code >> 10) & 0x3ff);
-						wc2 = 0xdc00 + (u_code & 0x3ff);
-					}
-					else
-					{
-						wc1 = (wchar_t) u_code;
-						wc2 = 0;
-					}
-					if (aTargetWindow)
-					{
-						// Although MSDN says WM_CHAR uses UTF-16, PostMessageA appears to truncate it to 8-bit.
-						// This probably means it does automatic translation between ANSI and UTF-16.  Since we
-						// specifically want to send a Unicode character value, use PostMessageW:
-						PostMessageW(aTargetWindow, WM_CHAR, wc1, 0);
-						if (wc2)
-							PostMessageW(aTargetWindow, WM_CHAR, wc2, 0);
-					}
-					else
-					{
-						// Use SendInput in unicode mode if available, otherwise fall back to SendASC.
-						// To know why the following requires sSendMode != SM_PLAY, see SendUnicodeChar.
-						if (sSendMode != SM_PLAY)
 						{
-							SendUnicodeChar(wc1, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
+							wc1 = (wchar_t)u_code;
+							wc2 = 0;
+						}
+						if (aTargetWindow)
+						{
+							// Although MSDN says WM_CHAR uses UTF-16, PostMessageA appears to truncate it to 8-bit.
+							// This probably means it does automatic translation between ANSI and UTF-16.  Since we
+							// specifically want to send a Unicode character value, use PostMessageW:
+							PostMessageW(aTargetWindow, WM_CHAR, wc1, 0);
 							if (wc2)
-								SendUnicodeChar(wc2, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
+								PostMessageW(aTargetWindow, WM_CHAR, wc2, 0);
 						}
-						else // Note that this method generally won't work with Unicode characters except
-						{	 // with specific controls which support it, such as RichEdit (tested on WordPad).
-							TCHAR asc[8];
-							*asc = '0';
-							_itot(u_code, asc + 1, 10);
-							SendASC(asc);
+						else
+						{
+							// Use SendInput in unicode mode if available, otherwise fall back to SendASC.
+							// To know why the following requires sSendMode != SM_PLAY, see SendUnicodeChar.
+							if (sSendMode != SM_PLAY)
+							{
+								SendUnicodeChar(wc1, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
+								if (wc2)
+									SendUnicodeChar(wc2, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
+							}
+							else // Note that this method generally won't work with Unicode characters except
+							{	 // with specific controls which support it, such as RichEdit (tested on WordPad).
+								TCHAR asc[8];
+								*asc = '0';
+								_itot(u_code, asc + 1, 10);
+								SendASC(asc);
+							}
 						}
+						DoKeyDelay();
 					}
-					DoKeyDelay();
-				}
 
-				//else do nothing since it isn't recognized as any of the above "else if" cases (see below).
+					// else do nothing since it isn't recognized as any of the above "else if" cases (see below).
 
-				// If what's between {} is unrecognized, such as {Bogus}, it's safest not to send
-				// the contents literally since that's almost certainly not what the user intended.
-				// In addition, reset the modifiers, since they were intended to apply only to
-				// the key inside {}.  Also, the below is done even if repeat-count is zero.
+					// If what's between {} is unrecognized, such as {Bogus}, it's safest not to send
+					// the contents literally since that's almost certainly not what the user intended.
+					// In addition, reset the modifiers, since they were intended to apply only to
+					// the key inside {}.  Also, the below is done even if repeat-count is zero.
 
-brace_case_end: // This label is used to simplify the code without sacrificing performance.
-				aKeys = end_pos;  // In prep for aKeys++ done by the loop.
-				mods_for_next_key = 0;
-				continue;
-			} // case '{'
-			} // switch()
-		} // if (!aSendRaw && strchr("^+!#{}", *aKeys))
+				brace_case_end:		 // This label is used to simplify the code without sacrificing performance.
+					aKeys = end_pos; // In prep for aKeys++ done by the loop.
+					mods_for_next_key = 0;
+					continue;
+				} // case '{'
+				} // switch()
+			} // if (!aSendRaw && strchr("^+!#{}", *aKeys))
 
 		else // Encountered a character other than ^+!#{} ... or we're in raw mode.
 		{
@@ -793,10 +798,18 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 					if (aKeys[1] == '\n')
 						++aKeys;
 					// Fall through:
-				case '\n': vk = VK_RETURN; break;
-				case '\b': vk = VK_BACK; break;
-				case '\t': vk = VK_TAB; break;
-				default: vk = 0; break; // Send all other characters via SendKeySpecial()/WM_CHAR.
+				case '\n':
+					vk = VK_RETURN;
+					break;
+				case '\b':
+					vk = VK_BACK;
+					break;
+				case '\t':
+					vk = VK_TAB;
+					break;
+				default:
+					vk = 0;
+					break; // Send all other characters via SendKeySpecial()/WM_CHAR.
 				}
 			}
 			else
@@ -805,31 +818,29 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 				// value of modifiers and the updated value is *not* guaranteed to be passed.
 				// In other words, SendKey(TextToVK(...), modifiers, ...) would often send the old
 				// value for modifiers.
-				vk = CharToVKAndModifiers(*aKeys, &mods_for_next_key, sTargetKeybdLayout
-					, (mods_for_next_key | persistent_modifiers_for_this_SendKeys) != 0 && !aSendRaw); // v1.1.27.00: Disable the a-z to vk41-vk5A fallback translation when modifiers are present since it would produce the wrong printable characters.
-				// CharToVKAndModifiers() takes no measurable time compared to the amount of time SendKey takes.
+				vk = CharToVKAndModifiers(*aKeys, &mods_for_next_key, sTargetKeybdLayout, (mods_for_next_key | persistent_modifiers_for_this_SendKeys) != 0 && !aSendRaw); // v1.1.27.00: Disable the a-z to vk41-vk5A fallback translation when modifiers are present since it would produce the wrong printable characters.
+																																										   // CharToVKAndModifiers() takes no measurable time compared to the amount of time SendKey takes.
 			}
 			if (vk)
-				SendKey(vk, 0, mods_for_next_key, persistent_modifiers_for_this_SendKeys, 1, KEYDOWNANDUP
-					, 0, aTargetWindow);
+				SendKey(vk, 0, mods_for_next_key, persistent_modifiers_for_this_SendKeys, 1, KEYDOWNANDUP, 0, aTargetWindow);
 			else // Try to send it by alternate means.
 			{
 				// In this mode, mods_for_next_key is ignored due to being unsupported.
-				if (aTargetWindow) 
+				if (aTargetWindow)
 					// Although MSDN says WM_CHAR uses UTF-16, it seems to really do automatic
 					// translation between ANSI and UTF-16; we rely on this for correct results:
 					PostMessage(aTargetWindow, WM_CHAR, *aKeys, 0);
 				else
 					SendKeySpecial(*aKeys, 1, mods_for_next_key | persistent_modifiers_for_this_SendKeys);
 			}
-			mods_for_next_key = 0;  // Safest to reset this regardless of whether a key was sent.
+			mods_for_next_key = 0; // Safest to reset this regardless of whether a key was sent.
 		}
 	} // for()
 
 	modLR_type mods_to_set;
 	if (sSendMode)
 	{
-		int final_key_delay = -1;  // Set default.
+		int final_key_delay = -1;				 // Set default.
 		if (!sAbortArraySend && sEventCount > 0) // Check for zero events for performance, but more importantly because playback hook will not operate correctly with zero.
 		{
 			// Add more events to the array (prior to sending) to support the following:
@@ -858,10 +869,9 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 			//    installed.  This too is documented, so scripts should generally avoid using SendInput when
 			//    they know there are other LL hooks in the system.  In any case, there's no known solution
 			//    for it, so nothing can be done.
-			mods_to_set = persistent_modifiers_for_this_SendKeys
-				| sModifiersLR_remapped // Restore any modifiers which were put in the down state by remappings or {key DownR} prior to this Send.
-				| (sInBlindMode ? mods_released_for_selective_blind
-					: (mods_down_physically_orig & ~mods_down_physically_but_not_logically_orig)); // The last item is usually 0.
+			mods_to_set = persistent_modifiers_for_this_SendKeys | sModifiersLR_remapped // Restore any modifiers which were put in the down state by remappings or {key DownR} prior to this Send.
+						  | (sInBlindMode ? mods_released_for_selective_blind
+										  : (mods_down_physically_orig & ~mods_down_physically_but_not_logically_orig)); // The last item is usually 0.
 			// Above: When in blind mode, don't restore physical modifiers.  This is done to allow a hotkey
 			// such as the following to release Shift:
 			//    +space::SendInput/Play {Blind}{Shift up}
@@ -889,9 +899,10 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 			// but do this only if the timeout period didn't expire (or the user specified that it never
 			// times out; i.e. elapsed time < timeout-value; DWORD subtraction gives the right answer even if
 			// tick-count has wrapped around).
-			mods_down_physically = (g_HotkeyModifierTimeout < 0 // It never times out or...
-				|| (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // It didn't time out.
-				? mods_down_physically_orig : 0;
+			mods_down_physically = (g_HotkeyModifierTimeout < 0															   // It never times out or...
+									|| (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // It didn't time out.
+									   ? mods_down_physically_orig
+									   : 0;
 
 		// Put any modifiers in sModifiersLR_remapped back into effect, as if they were physically down.
 		mods_down_physically |= sModifiersLR_remapped;
@@ -911,7 +922,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 		// If any "persistent" modifiers aren't down now, they were likely released by something external
 		// during the Send, and to avoid stuck modifiers, they should not be pushed back down.
 		mods_to_set = persistent_modifiers_for_this_SendKeys & mods_current; // Set default.
-		if (sInBlindMode) // This section is not needed for the array-sending modes because they exploit uninterruptibility to perform a more reliable restoration.
+		if (sInBlindMode)													 // This section is not needed for the array-sending modes because they exploit uninterruptibility to perform a more reliable restoration.
 		{
 			// For selective {Blind!#^+}, restore any modifiers that were automatically released at the
 			// start, such as for *^1::Send "{Blind^}2" when Ctrl+Alt+1 is pressed (Ctrl is released).
@@ -934,23 +945,23 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 			// in blind mode, never restore modifiers to the down position then.
 			mods_to_set |= mods_changed_physically_during_send & mods_down_physically; // Add those that changed from up to down.
 		}
-		else // Regardless of whether the keyboard hook is present, the following formula applies.
+		else																					// Regardless of whether the keyboard hook is present, the following formula applies.
 			mods_to_set |= mods_down_physically & ~mods_down_physically_but_not_logically_orig; // The second item is usually 0.
-			// Above takes into account the fact that the user may have pressed and/or released some modifiers
-			// during the Send.
-			// So it includes all keys that are physically down except those that were down physically but not
-			// logically at the *start* of the send operation (since the send operation may have changed the
-			// logical state).  In other words, we want to restore the keys to their former logical-down
-			// position to match the fact that the user is still holding them down physically.  The
-			// previously-down keys we don't do this for are those that were physically but not logically down,
-			// such as a naked Control key that's used as a suffix without being a prefix.  More details:
-			// mods_down_physically_but_not_logically_orig is used to distinguish between the following two cases,
-			// allowing modifiers to be properly restored to the down position when the hook is installed:
-			// 1) A naked modifier key used only as suffix: when the user phys. presses it, it isn't
-			//    logically down because the hook suppressed it.
-			// 2) A modifier that is a prefix, that triggers a hotkey via a suffix, and that hotkey sends
-			//    that modifier.  The modifier will go back up after the SEND, so the key will be physically
-			//    down but not logically.
+																								// Above takes into account the fact that the user may have pressed and/or released some modifiers
+																								// during the Send.
+																								// So it includes all keys that are physically down except those that were down physically but not
+																								// logically at the *start* of the send operation (since the send operation may have changed the
+																								// logical state).  In other words, we want to restore the keys to their former logical-down
+																								// position to match the fact that the user is still holding them down physically.  The
+																								// previously-down keys we don't do this for are those that were physically but not logically down,
+																								// such as a naked Control key that's used as a suffix without being a prefix.  More details:
+																								// mods_down_physically_but_not_logically_orig is used to distinguish between the following two cases,
+																								// allowing modifiers to be properly restored to the down position when the hook is installed:
+																								// 1) A naked modifier key used only as suffix: when the user phys. presses it, it isn't
+																								//    logically down because the hook suppressed it.
+																								// 2) A modifier that is a prefix, that triggers a hotkey via a suffix, and that hotkey sends
+																								//    that modifier.  The modifier will go back up after the SEND, so the key will be physically
+																								//    down but not logically.
 
 		// Use KEY_IGNORE_ALL_EXCEPT_MODIFIER to tell the hook to adjust g_modifiersLR_logical_non_ignored
 		// because these keys being put back down match the physical pressing of those same keys by the
@@ -987,8 +998,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 		// other.  The below uses ^ to find the differences between the two, then uses & to
 		// find which are down in non_ignored that aren't in logical, then inverts those bits
 		// in g_modifiersLR_logical_non_ignored, which sets those keys to be in the up position:
-		g_modifiersLR_logical_non_ignored &= ~((g_modifiersLR_logical ^ g_modifiersLR_logical_non_ignored)
-			& g_modifiersLR_logical_non_ignored);
+		g_modifiersLR_logical_non_ignored &= ~((g_modifiersLR_logical ^ g_modifiersLR_logical_non_ignored) & g_modifiersLR_logical_non_ignored);
 	}
 
 	if (prior_capslock_state == TOGGLED_ON) // The current user setting requires us to turn it back on.
@@ -1033,11 +1043,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 	g.PressDuration = orig_press_duration;
 }
 
-
-
-void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModifiersLRPersistent
-	, int aRepeatCount, KeyEventTypes aEventType, modLR_type aKeyAsModifiersLR, HWND aTargetWindow
-	, int aX, int aY, bool aMoveOffset)
+void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModifiersLRPersistent, int aRepeatCount, KeyEventTypes aEventType, modLR_type aKeyAsModifiersLR, HWND aTargetWindow, int aX, int aY, bool aMoveOffset)
 // Caller has ensured that: 1) vk or sc may be zero, but not both; 2) aRepeatCount > 0.
 // This function is responsible for first setting the correct state of the modifier keys
 // (as specified by the caller) before sending the key.  After sending, it should put the
@@ -1048,7 +1054,7 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 	// Avoid changing modifier states and other things if there is nothing to be sent.
 	// Otherwise, menu bar might activated due to ALT keystrokes that don't modify any key,
 	// the Start Menu might appear due to WIN keystrokes that don't modify anything, etc:
-	//if ((!aVK && !aSC) || aRepeatCount < 1)
+	// if ((!aVK && !aSC) || aRepeatCount < 1)
 	//	return;
 
 	// I thought maybe it might be best not to release unwanted modifier keys that are already down
@@ -1077,51 +1083,50 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 	for (int i = 0; i < aRepeatCount; ++i)
 	{
 		if (!sSendMode)
-			LONG_OPERATION_UPDATE_FOR_SENDKEYS  // This does not measurably affect the performance of SendPlay/Event.
-		// These modifiers above stay in effect for each of these keypresses.
-		// Always on the first iteration, and thereafter only if the send won't be essentially
-		// instantaneous.  The modifiers are checked before every key is sent because
-		// if a high repeat-count was specified, the user may have time to release one or more
-		// of the modifier keys that were used to trigger a hotkey.  That physical release
-		// will cause a key-up event which will cause the state of the modifiers, as seen
-		// by the system, to change.  For example, if user releases control-key during the operation,
-		// some of the D's won't be control-D's:
-		// ^c::Send,^{d 15}
-		// Also: Seems best to do SetModifierLRState() even if Keydelay < 0:
-		// Update: If this key is itself a modifier, don't change the state of the other
-		// modifier keys just for it, since most of the time that is unnecessary and in
-		// some cases, the extra generated keystrokes would cause complications/side-effects.
-		if (!aKeyAsModifiersLR)
-		{
-			// DISGUISE UP: Pass "true" to disguise UP-events on WIN and ALT due to hotkeys such as:
-			// !a::Send test
-			// !a::Send {LButton}
-			// v1.0.40: It seems okay to tell SetModifierLRState to disguise Win/Alt regardless of
-			// whether our caller is in blind mode.  This is because our caller already put any extra
-			// blind-mode modifiers into modifiersLR_specified, which prevents any actual need to
-			// disguise anything (only the release of Win/Alt is ever disguised).
-			// DISGUISE DOWN: Pass "false" to avoid disguising DOWN-events on Win and Alt because Win/Alt
-			// will be immediately followed by some key for them to "modify".  The exceptions to this are
-			// when aVK is a mouse button (e.g. sending !{LButton} or #{LButton}).  But both of those are
-			// so rare that the flexibility of doing exactly what the script specifies seems better than
-			// a possibly unwanted disguising.  Also note that hotkeys such as #LButton automatically use
-			// both hooks so that the Start Menu doesn't appear when the Win key is released, so we're
-			// not responsible for that type of disguising here.
-			SetModifierLRState(modifiersLR_specified, sSendMode ? sEventModifiersLR : GetModifierLRState()
-				, aTargetWindow, false, true, g->SendLevel ? KEY_IGNORE_LEVEL(g->SendLevel) : KEY_IGNORE); // See keyboard_mouse.h for explanation of KEY_IGNORE.
-			// Above: Fixed for v1.1.27 to use KEY_IGNORE except when SendLevel is non-zero (since that
-			// would indicate that the script probably wants to trigger a hotkey).  KEY_IGNORE is used
-			// (and was prior to v1.1.06.00) to prevent the temporary modifier state changes here from
-			// interfering with the use of hotkeys while a Send is in progress.
-			// SetModifierLRState() also does DoKeyDelay(g->PressDuration).
-		}
+			LONG_OPERATION_UPDATE_FOR_SENDKEYS // This does not measurably affect the performance of SendPlay/Event.
+				// These modifiers above stay in effect for each of these keypresses.
+				// Always on the first iteration, and thereafter only if the send won't be essentially
+				// instantaneous.  The modifiers are checked before every key is sent because
+				// if a high repeat-count was specified, the user may have time to release one or more
+				// of the modifier keys that were used to trigger a hotkey.  That physical release
+				// will cause a key-up event which will cause the state of the modifiers, as seen
+				// by the system, to change.  For example, if user releases control-key during the operation,
+				// some of the D's won't be control-D's:
+				// ^c::Send,^{d 15}
+				// Also: Seems best to do SetModifierLRState() even if Keydelay < 0:
+				// Update: If this key is itself a modifier, don't change the state of the other
+				// modifier keys just for it, since most of the time that is unnecessary and in
+				// some cases, the extra generated keystrokes would cause complications/side-effects.
+				if (!aKeyAsModifiersLR)
+			{
+				// DISGUISE UP: Pass "true" to disguise UP-events on WIN and ALT due to hotkeys such as:
+				// !a::Send test
+				// !a::Send {LButton}
+				// v1.0.40: It seems okay to tell SetModifierLRState to disguise Win/Alt regardless of
+				// whether our caller is in blind mode.  This is because our caller already put any extra
+				// blind-mode modifiers into modifiersLR_specified, which prevents any actual need to
+				// disguise anything (only the release of Win/Alt is ever disguised).
+				// DISGUISE DOWN: Pass "false" to avoid disguising DOWN-events on Win and Alt because Win/Alt
+				// will be immediately followed by some key for them to "modify".  The exceptions to this are
+				// when aVK is a mouse button (e.g. sending !{LButton} or #{LButton}).  But both of those are
+				// so rare that the flexibility of doing exactly what the script specifies seems better than
+				// a possibly unwanted disguising.  Also note that hotkeys such as #LButton automatically use
+				// both hooks so that the Start Menu doesn't appear when the Win key is released, so we're
+				// not responsible for that type of disguising here.
+				SetModifierLRState(modifiersLR_specified, sSendMode ? sEventModifiersLR : GetModifierLRState(), aTargetWindow, false, true, g->SendLevel ? KEY_IGNORE_LEVEL(g->SendLevel) : KEY_IGNORE); // See keyboard_mouse.h for explanation of KEY_IGNORE.
+																																																		 // Above: Fixed for v1.1.27 to use KEY_IGNORE except when SendLevel is non-zero (since that
+																																																		 // would indicate that the script probably wants to trigger a hotkey).  KEY_IGNORE is used
+																																																		 // (and was prior to v1.1.06.00) to prevent the temporary modifier state changes here from
+																																																		 // interfering with the use of hotkeys while a Send is in progress.
+																																																		 // SetModifierLRState() also does DoKeyDelay(g->PressDuration).
+			}
 
 		// v1.0.42.04: Mouse clicks are now handled here in the same loop as keystrokes so that the modifiers
 		// will be readjusted (above) if the user presses/releases modifier keys during the mouse clicks.
 		if (vk_is_mouse && !aTargetWindow)
 			MouseClick(aVK, aX, aY, 1, g->DefaultMouseSpeed, aEventType, aMoveOffset);
-			// Above: Since it's rare to send more than one click, it seems best to simplify and reduce code size
-			// by not doing more than one click at a time event when mode is SendInput/Play.
+		// Above: Since it's rare to send more than one click, it seems best to simplify and reduce code size
+		// by not doing more than one click at a time event when mode is SendInput/Play.
 		else
 			// Sending mouse clicks via ControlSend is not supported, so in that case fall back to the
 			// old method of sending the VK directly (which probably has no effect 99% of the time):
@@ -1179,8 +1184,8 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 		// determination.  This avoids extra keystrokes, while still procrastinating the release of Ctrl/Shift so
 		// that those can be left down if the caller's next keystroke happens to need them.
 		modLR_type state_now = sSendMode ? sEventModifiersLR : GetModifierLRState();
-		modLR_type win_alt_to_be_released = (state_now & ~aModifiersLRPersistent) // The modifiers to be released...
-			& (MOD_LWIN|MOD_RWIN|MOD_LALT|MOD_RALT); // ... but restrict them to only Win/Alt.
+		modLR_type win_alt_to_be_released = (state_now & ~aModifiersLRPersistent)		   // The modifiers to be released...
+											& (MOD_LWIN | MOD_RWIN | MOD_LALT | MOD_RALT); // ... but restrict them to only Win/Alt.
 		if (win_alt_to_be_released)
 		{
 			// Originally used the following for mods new/now: state_now & ~win_alt_to_be_released, state_now
@@ -1196,8 +1201,6 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 	}
 }
 
-
-
 void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR)
 // Caller must be aware that keystrokes are sent directly (i.e. never to a target window via ControlSend mode).
 // It must also be aware that the event type KEYDOWNANDUP is always what's used since there's no way
@@ -1209,7 +1212,7 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR)
 	// Avoid changing modifier states and other things if there is nothing to be sent.
 	// Otherwise, menu bar might activated due to ALT keystrokes that don't modify any key,
 	// the Start Menu might appear due to WIN keystrokes that don't modify anything, etc:
-	//if (aRepeatCount < 1)
+	// if (aRepeatCount < 1)
 	//	return;
 
 	// v1.0.40: This function was heavily simplified because the old method of simulating
@@ -1246,14 +1249,14 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR)
 		// The following range isn't checked because this function appears never to be called for such
 		// characters (tested in English and Russian so far), probably because VkKeyScan() finds a way to
 		// manifest them via Control+VK combinations:
-		//if (aChar > -1 && aChar < 32)
+		// if (aChar > -1 && aChar < 32)
 		//	return;
 		TCHAR *cp = asc_string;
-		if (aChar & ~127)    // Try using ANSI.
+		if (aChar & ~127) // Try using ANSI.
 			*cp++ = '0';  // ANSI mode is achieved via leading zero in the Alt+Numpad keystrokes.
-		//else use Alt+Numpad without the leading zero, which allows the characters a-z, A-Z, and quite
-		// a few others to be produced in Russian and perhaps other layouts, which was impossible in versions
-		// prior to 1.0.40.
+		// else use Alt+Numpad without the leading zero, which allows the characters a-z, A-Z, and quite
+		//  a few others to be produced in Russian and perhaps other layouts, which was impossible in versions
+		//  prior to 1.0.40.
 		_itot((TBYTE)aChar, cp, 10); // Convert to UCHAR in case aChar < 0.
 	}
 	else
@@ -1289,8 +1292,6 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR)
 	//    modify and thus not need to be disguised.
 }
 
-
-
 void SendASC(LPCTSTR aAscii)
 // Caller must be aware that keystrokes are sent directly (i.e. never to a target window via ControlSend mode).
 // aAscii is a string to support explicit leading zeros because sending 216, for example, is not the same as
@@ -1319,9 +1320,9 @@ void SendASC(LPCTSTR aAscii)
 	// has more than one set of triggering modifiers (for when the user is holding down
 	// that suffix to auto-repeat it -- see keyboard_mouse.h for details).
 	modLR_type modifiersLR_now = sSendMode ? sEventModifiersLR : GetModifierLRState();
-	SetModifierLRState((modifiersLR_now | MOD_LALT) & ~(MOD_RALT | MOD_LCONTROL | MOD_RCONTROL | MOD_LSHIFT | MOD_RSHIFT)
-		, modifiersLR_now, NULL, false // Pass false because there's no need to disguise the down-event of LALT.
-		, true, KEY_IGNORE); // Pass true so that any release of RALT is disguised (Win is never released here).
+	SetModifierLRState((modifiersLR_now | MOD_LALT) & ~(MOD_RALT | MOD_LCONTROL | MOD_RCONTROL | MOD_LSHIFT | MOD_RSHIFT), modifiersLR_now, NULL, false // Pass false because there's no need to disguise the down-event of LALT.
+					   ,
+					   true, KEY_IGNORE); // Pass true so that any release of RALT is disguised (Win is never released here).
 	// Note: It seems best never to press back down any key released above because the
 	// act of doing so may do more harm than good (i.e. the keystrokes may caused
 	// unexpected side-effects.
@@ -1362,8 +1363,6 @@ void SendASC(LPCTSTR aAscii)
 	KeyEvent(KEYUP, VK_MENU);
 }
 
-
-
 LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 // Journal playback hook.
 {
@@ -1388,9 +1387,10 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 			sFirstCallForThisEvent = false;
 			sThisEventHasBeenLogged = false;
 			sThisEventIsScreenCoord = false;
-			for (sThisEventTime = GetTickCount()
-				; !sEventPB[sCurrentEvent].message // HC_SKIP has ensured there is a non-delay event, so no need to check sCurrentEvent < sEventCount.
-				; sThisEventTime += sEventPB[sCurrentEvent++].time_to_wait); // Overflow is okay.
+			for (sThisEventTime = GetTickCount(); !sEventPB[sCurrentEvent].message // HC_SKIP has ensured there is a non-delay event, so no need to check sCurrentEvent < sEventCount.
+				 ;
+				 sThisEventTime += sEventPB[sCurrentEvent++].time_to_wait)
+				; // Overflow is okay.
 		}
 		// Above has ensured that sThisEventTime is valid regardless of whether this is the first call
 		// for this event.  It has also incremented sCurrentEvent, if needed, for use below.
@@ -1399,7 +1399,7 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 		// MSDN says that HC_GETNEXT can be received multiple times consecutively, in which case the
 		// same event should be copied into the structure each time.
 		PlaybackEvent &source_event = sEventPB[sCurrentEvent];
-		EVENTMSG &event = *(PEVENTMSG)lParam;  // For convenience, maintainability, and possibly performance.
+		EVENTMSG &event = *(PEVENTMSG)lParam; // For convenience, maintainability, and possibly performance.
 		// Currently, the following isn't documented entirely accurately at MSDN, but other sources confirm
 		// the below are the proper values to store.  In addition, the extended flag as set below has been
 		// confirmed to work properly by monitoring the resulting WM_KEYDOWN message in a main message loop.
@@ -1421,38 +1421,38 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 		{
 			event.paramL = (source_event.sc << 8) | source_event.vk;
 			event.paramH = source_event.sc & 0xFF; // 0xFF omits the extended-key-bit, if present.
-			if (source_event.sc & 0x100) // It's an extended key.
-				event.paramH |= 0x8000; // So mark it that way using EVENTMSG's convention.
-			// Notes about inability of playback to simulate LWin and RWin in a way that performs their native function:
-			// For the following reasons, it seems best not to send LWin/RWin via keybd_event inside the playback hook:
-			// 1) Complexities such as having to check for an array that consists entirely of LWin/RWin events,
-			//    in which case the playback hook mustn't be activated because it requires that we send
-			//    at least one event through it.  Another complexity is that all keys modified by Win would
-			//    have to be flagged in the array as needing to be sent via keybd_event.
-			// 2) It might preserve some flexibility to be able to send LWin/RWin events directly to a window,
-			//    similar to ControlSend (perhaps for shells other than Explorer, who might allow apps to make
-			//    use of LWin/RWin internally). The window should receive LWIN/RWIN as WM_KEYDOWN messages when
-			//    sent via playback.  Note: unlike the neutral SHIFT/ALT/CTRL keys, which are detectible via the
-			//    target thread's call to GetKeyState(), LWin and RWin aren't detectible that way.
-			// 3) Code size and complexity.
-			//
-			// Related: LWin and RWin are released and pressed down during playback for simplicity and also
-			// on the off-chance the target window takes note of the incoming WM_KEYDOWN on VK_LWIN/RWIN and
-			// changes state until the up-event is received (however, the target thread's call of GetKeyState
-			// can't see a any effect for hook-sent LWin/RWin).
-			//
-			// Related: If LWin or RWin is logically down at start of SendPlay, SendPlay's events won't be
-			// able to release it from the POV of the target thread's calls to GetKeyState().  That might mess
-			// things up for apps that check the logical state of the Win keys.  But due to rarity: in those
-			// cases, a workaround would be to do an explicit old-style Send {Blind} (as the first line of the
-			// hotkey) to release the modifier logically prior to SendPlay commands.
-			//
-			// Related: Although some apps might not like receiving SendPlay's LWin/RWin if shell==Explorer
-			// (since there may be no normal way for such keystrokes to arrive as WM_KEYDOWN events) maybe it's
-			// best not to omit/ignore LWin/RWin if it is possible in other shells, or adds flexibility.
-			// After all, sending {LWin/RWin} via hook should be rare, especially if it has no effect (except
-			// for cases where a Win hotkey releases LWin as part of SendPlay, but even that can be worked
-			// around via an explicit Send {Blind}{LWin up} beforehand).
+			if (source_event.sc & 0x100)		   // It's an extended key.
+				event.paramH |= 0x8000;			   // So mark it that way using EVENTMSG's convention.
+												   // Notes about inability of playback to simulate LWin and RWin in a way that performs their native function:
+												   // For the following reasons, it seems best not to send LWin/RWin via keybd_event inside the playback hook:
+												   // 1) Complexities such as having to check for an array that consists entirely of LWin/RWin events,
+												   //    in which case the playback hook mustn't be activated because it requires that we send
+												   //    at least one event through it.  Another complexity is that all keys modified by Win would
+												   //    have to be flagged in the array as needing to be sent via keybd_event.
+												   // 2) It might preserve some flexibility to be able to send LWin/RWin events directly to a window,
+												   //    similar to ControlSend (perhaps for shells other than Explorer, who might allow apps to make
+												   //    use of LWin/RWin internally). The window should receive LWIN/RWIN as WM_KEYDOWN messages when
+												   //    sent via playback.  Note: unlike the neutral SHIFT/ALT/CTRL keys, which are detectible via the
+												   //    target thread's call to GetKeyState(), LWin and RWin aren't detectible that way.
+												   // 3) Code size and complexity.
+												   //
+												   // Related: LWin and RWin are released and pressed down during playback for simplicity and also
+												   // on the off-chance the target window takes note of the incoming WM_KEYDOWN on VK_LWIN/RWIN and
+												   // changes state until the up-event is received (however, the target thread's call of GetKeyState
+												   // can't see a any effect for hook-sent LWin/RWin).
+												   //
+												   // Related: If LWin or RWin is logically down at start of SendPlay, SendPlay's events won't be
+												   // able to release it from the POV of the target thread's calls to GetKeyState().  That might mess
+												   // things up for apps that check the logical state of the Win keys.  But due to rarity: in those
+												   // cases, a workaround would be to do an explicit old-style Send {Blind} (as the first line of the
+												   // hotkey) to release the modifier logically prior to SendPlay commands.
+												   //
+												   // Related: Although some apps might not like receiving SendPlay's LWin/RWin if shell==Explorer
+												   // (since there may be no normal way for such keystrokes to arrive as WM_KEYDOWN events) maybe it's
+												   // best not to omit/ignore LWin/RWin if it is possible in other shells, or adds flexibility.
+												   // After all, sending {LWin/RWin} via hook should be rare, especially if it has no effect (except
+												   // for cases where a Win hotkey releases LWin as part of SendPlay, but even that can be worked
+												   // around via an explicit Send {Blind}{LWin up} beforehand).
 		}
 		else // MOUSE EVENT.
 		{
@@ -1485,7 +1485,7 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 			{
 				event.paramL = source_event.x;
 				event.paramH = source_event.y;
-				if (!sThisEventIsScreenCoord) // Coordinates are relative to the window that is active now (during realtime playback).
+				if (!sThisEventIsScreenCoord)												   // Coordinates are relative to the window that is active now (during realtime playback).
 					CoordToScreen((int &)event.paramL, (int &)event.paramH, COORD_MODE_MOUSE); // Playback uses screen coords.
 			}
 		}
@@ -1499,8 +1499,7 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 			// The event is logged here rather than higher above so that its timestamp is accurate.
 			// It's also so that events aren't logged if the user cancel's the operation in the middle
 			// (by pressing Ctrl-Alt-Del or Ctrl-Esc).
-			UpdateKeyEventHistory(source_event.message == WM_KEYUP || source_event.message == WM_SYSKEYUP
-				, source_event.vk, source_event.sc);
+			UpdateKeyEventHistory(source_event.message == WM_KEYUP || source_event.message == WM_SYSKEYUP, source_event.vk, source_event.sc);
 			sThisEventHasBeenLogged = true;
 		}
 		return 0; // No CallNextHookEx(). See comments further below.
@@ -1514,7 +1513,8 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 		// array anyway for code simplicity.  For that reason and maintainability:
 		// Skip over any delays that are present to discover if there is a next event.
 		UINT u;
-		for (u = sCurrentEvent; u < sEventCount && !sEventPB[u].message; ++u);
+		for (u = sCurrentEvent; u < sEventCount && !sEventPB[u].message; ++u)
+			;
 		if (u == sEventCount) // No more events.
 		{
 			// MSDN implies in the following statement that it's acceptable (and perhaps preferable in
@@ -1522,24 +1522,24 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 			// state of being called by another thread even after UnhookWindowsHookEx returns."
 			UnhookWindowsHookEx(g_PlaybackHook);
 			g_PlaybackHook = NULL; // Signal the installer of the hook that it's gone now.
-			// The following is an obsolete method from pre-v1.0.44.  Do not reinstate it without adding handling
-			// to MainWindowProc() to do "g_PlaybackHook = NULL" upon receipt of WM_CANCELJOURNAL.
-			// PostMessage(g_hWnd, WM_CANCELJOURNAL, 0, 0); // v1.0.44: Post it to g_hWnd vs. NULL because it's a little safer (SEE COMMENTS in MsgSleep's WM_CANCELJOURNAL for why it's almost completely safe with NULL).
-			// Above: By using WM_CANCELJOURNAL instead of a custom message, the creator of this hook can easily
-			// use a message filter to watch for both a system-generated removal of the hook (via the user
-			// pressing Ctrl-Esc. or Ctrl-Alt-Del) or one we generate here (though it's currently not implemented
-			// that way because it would prevent journal playback to one of our thread's own windows).
+								   // The following is an obsolete method from pre-v1.0.44.  Do not reinstate it without adding handling
+								   // to MainWindowProc() to do "g_PlaybackHook = NULL" upon receipt of WM_CANCELJOURNAL.
+								   // PostMessage(g_hWnd, WM_CANCELJOURNAL, 0, 0); // v1.0.44: Post it to g_hWnd vs. NULL because it's a little safer (SEE COMMENTS in MsgSleep's WM_CANCELJOURNAL for why it's almost completely safe with NULL).
+								   // Above: By using WM_CANCELJOURNAL instead of a custom message, the creator of this hook can easily
+								   // use a message filter to watch for both a system-generated removal of the hook (via the user
+								   // pressing Ctrl-Esc. or Ctrl-Alt-Del) or one we generate here (though it's currently not implemented
+								   // that way because it would prevent journal playback to one of our thread's own windows).
 		}
 		else
 			sFirstCallForThisEvent = true; // Reset to prepare for next HC_GETNEXT.
-		return 0; // MSDN: The return value is used only if the hook code is HC_GETNEXT; otherwise, it is ignored.
+		return 0;						   // MSDN: The return value is used only if the hook code is HC_GETNEXT; otherwise, it is ignored.
 
 	default:
 		// Covers the following cases:
-		//case HC_NOREMOVE: // MSDN: An application has called the PeekMessage function with wRemoveMsg set to PM_NOREMOVE, indicating that the message is not removed from the message queue after PeekMessage processing.
-		//case HC_SYSMODALON:  // MSDN: A system-modal dialog box is being displayed. Until the dialog box is destroyed, the hook procedure must stop playing back messages.
-		//case HC_SYSMODALOFF: // MSDN: A system-modal dialog box has been destroyed. The hook procedure must resume playing back the messages.
-		//case(...aCode < 0...): MSDN docs specify that the hook should return in this case.
+		// case HC_NOREMOVE: // MSDN: An application has called the PeekMessage function with wRemoveMsg set to PM_NOREMOVE, indicating that the message is not removed from the message queue after PeekMessage processing.
+		// case HC_SYSMODALON:  // MSDN: A system-modal dialog box is being displayed. Until the dialog box is destroyed, the hook procedure must stop playing back messages.
+		// case HC_SYSMODALOFF: // MSDN: A system-modal dialog box has been destroyed. The hook procedure must resume playing back the messages.
+		// case(...aCode < 0...): MSDN docs specify that the hook should return in this case.
 		//
 		// MS gives some sample code at http://support.microsoft.com/default.aspx?scid=KB;EN-US;124835
 		// about the proper values to return to avoid hangs on NT (it seems likely that this implementation
@@ -1563,10 +1563,7 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 	// Execution should never reach since all cases do their own custom return above.
 }
 
-
-
-void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWindow
-	, bool aDoKeyDelay, DWORD aExtraInfo)
+void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWindow, bool aDoKeyDelay, DWORD aExtraInfo)
 // aSC or aVK (but not both), can be zero to cause the default to be used.
 // For keys like NumpadEnter -- that have a unique scancode but a non-unique virtual key --
 // caller can just specify the sc.  In addition, the scan code should be specified for keys
@@ -1597,8 +1594,13 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 	//   !vk && !sc
 	//   !(aVK || aSC)
 
-	if (!aExtraInfo) // Shouldn't be called this way because 0 is considered false in some places below (search on " = aExtraInfo" to find them).
+	if (!aExtraInfo)								 // Shouldn't be called this way because 0 is considered false in some places below (search on " = aExtraInfo" to find them).
 		aExtraInfo = KEY_IGNORE_ALL_EXCEPT_MODIFIER; // Seems slightly better to use a standard default rather than something arbitrary like 1.
+
+	// Mark AHK-generated keystrokes with a dedicated tag so the low-level hook can recognize them
+	// without interpreting the value as one of the reserved input-level ignore values.
+	if (!IsAhkGenerated(aExtraInfo))
+		aExtraInfo |= KEY_AHK_INTERNAL;
 
 	// Since calls from the hook thread could come in even while the SendInput array is being constructed,
 	// don't let those events get interspersed with the script's explicit use of SendInput.
@@ -1612,15 +1614,14 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 	// In any case, it's unlikely to hurt anything:
 	if (!aVK)
 		aVK = sc_to_vk(aSC);
-	else
-		if (!aSC)
-			// In spite of what the MSDN docs say, the scan code parameter *is* used, as evidenced by
-			// the fact that the hook receives the proper scan code as sent by the below, rather than
-			// zero like it normally would.  Even though the hook would try to use MapVirtualKey() to
-			// convert zero-value scan codes, it's much better to send it here also for full compatibility
-			// with any apps that may rely on scan code (and such would be the case if the hook isn't
-			// active because the user doesn't need it; also for some games maybe).
-			aSC = vk_to_sc(aVK);
+	else if (!aSC)
+		// In spite of what the MSDN docs say, the scan code parameter *is* used, as evidenced by
+		// the fact that the hook receives the proper scan code as sent by the below, rather than
+		// zero like it normally would.  Even though the hook would try to use MapVirtualKey() to
+		// convert zero-value scan codes, it's much better to send it here also for full compatibility
+		// with any apps that may rely on scan code (and such would be the case if the hook isn't
+		// active because the user doesn't need it; also for some games maybe).
+		aSC = vk_to_sc(aVK);
 
 	BYTE aSC_lobyte = LOBYTE(aSC);
 	DWORD event_flags = HIBYTE(aSC) ? KEYEVENTF_EXTENDEDKEY : 0;
@@ -1629,14 +1630,20 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 	// rather than left/right ones.  Otherwise, the Shift key can't capitalize letters, etc.
 	if (sSendMode == SM_PLAY)
 	{
-		switch(aVK)
+		switch (aVK)
 		{
 		case VK_LCONTROL:
-		case VK_RCONTROL: aVK = VK_CONTROL; break; // But leave scan code set to a left/right specific value rather than converting it to "left" unconditionally.
+		case VK_RCONTROL:
+			aVK = VK_CONTROL;
+			break; // But leave scan code set to a left/right specific value rather than converting it to "left" unconditionally.
 		case VK_LSHIFT:
-		case VK_RSHIFT: aVK = VK_SHIFT; break;
+		case VK_RSHIFT:
+			aVK = VK_SHIFT;
+			break;
 		case VK_LMENU:
-		case VK_RMENU: aVK = VK_MENU; break;
+		case VK_RMENU:
+			aVK = VK_MENU;
+			break;
 		}
 	}
 
@@ -1676,9 +1683,9 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 			// It's rarely if ever called that way anyway.
 
 			// If aVK is a left/right specific key, be sure to also update the state of the neutral key:
-			switch(aVK)
+			switch (aVK)
 			{
-			case VK_LCONTROL: 
+			case VK_LCONTROL:
 			case VK_RCONTROL:
 				if ((state[VK_LCONTROL] & 0x80) || (state[VK_RCONTROL] & 0x80))
 					state[VK_CONTROL] |= 0x80;
@@ -1709,14 +1716,14 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 		// lowest 16 bits: repeat count: always 1 for up events, probably 1 for down in our case.
 		// highest order bits: 11000000 (0xC0) for keyup, usually 00000000 (0x00) for keydown.
 		LPARAM lParam = (LPARAM)(aSC << 16);
-		if (aEventType != KEYUP)  // i.e. always do it for KEYDOWNANDUP
+		if (aEventType != KEYUP) // i.e. always do it for KEYDOWNANDUP
 			PostMessage(aTargetWindow, WM_KEYDOWN, aVK, lParam | 0x00000001);
 		// The press-duration delay is done only when this is a down-and-up because otherwise,
 		// the normal g->KeyDelay will be in effect.  In other words, it seems undesirable in
 		// most cases to do both delays for only "one half" of a keystroke:
 		if (aDoKeyDelay && aEventType == KEYDOWNANDUP)
 			DoKeyDelay(g->PressDuration); // Since aTargetWindow!=NULL, sSendMode!=SM_PLAY, so no need for to ever use the SendPlay press-duration.
-		if (aEventType != KEYDOWN)  // i.e. always do it for KEYDOWNANDUP
+		if (aEventType != KEYDOWN)		  // i.e. always do it for KEYDOWNANDUP
 			PostMessage(aTargetWindow, WM_KEYUP, aVK, lParam | 0xC0000001);
 	}
 	else // Keystrokes are to be sent with keybd_event() or the event array rather than PostMessage().
@@ -1731,17 +1738,17 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 		sPrevVK = aVK;
 
 		bool target_layout_has_altgr = (caller_is_keybd_hook ? LayoutHasAltGr(GetFocusedKeybdLayout())
-			: sTargetLayoutHasAltGr) == CONDITION_TRUE; // i.e. not CONDITION_FALSE (which is nonzero) or FAIL (zero).
+															 : sTargetLayoutHasAltGr) == CONDITION_TRUE; // i.e. not CONDITION_FALSE (which is nonzero) or FAIL (zero).
 		bool hookable_altgr = aVK == VK_RMENU && target_layout_has_altgr && !put_event_into_array && g_KeybdHook;
 
 		// Calculated only once for performance (and avoided entirely if not needed):
 		modLR_type key_as_modifiersLR = put_event_into_array ? KeyToModifiersLR(aVK, aSC) : 0;
 
-		bool do_key_history = !caller_is_keybd_hook // If caller is hook, don't log because it does.
-			&& sSendMode != SM_PLAY  // In playback mode, the journal hook logs so that timestamps are accurate.
-			&& (!g_KeybdHook || sSendMode == SM_INPUT); // In the remaining cases, log only when the hook isn't installed or won't be at the time of the event.
+		bool do_key_history = !caller_is_keybd_hook						  // If caller is hook, don't log because it does.
+							  && sSendMode != SM_PLAY					  // In playback mode, the journal hook logs so that timestamps are accurate.
+							  && (!g_KeybdHook || sSendMode == SM_INPUT); // In the remaining cases, log only when the hook isn't installed or won't be at the time of the event.
 
-		if (aEventType != KEYUP)  // i.e. always do it for KEYDOWNANDUP
+		if (aEventType != KEYUP) // i.e. always do it for KEYDOWNANDUP
 		{
 			if (put_event_into_array)
 				PutKeybdEventIntoArray(key_as_modifiersLR, aVK, aSC, event_flags, aExtraInfo);
@@ -1758,7 +1765,8 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 				if (hookable_altgr)
 					g_AltGrExtraInfo = aExtraInfo;
 				keybd_event(aVK, aSC_lobyte // naked scan code (the 0xE0 prefix, if any, is omitted)
-					, event_flags, aExtraInfo);
+							,
+							event_flags, aExtraInfo);
 				g_AltGrExtraInfo = 0; // Unconditional reset.
 			}
 
@@ -1768,9 +1776,9 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 		// The press-duration delay is done only when this is a down-and-up because otherwise,
 		// the normal g->KeyDelay will be in effect.  In other words, it seems undesirable in
 		// most cases to do both delays for only "one half" of a keystroke:
-		if (aDoKeyDelay && aEventType == KEYDOWNANDUP) // Hook should never specify a delay, so no need to check if caller is hook.
+		if (aDoKeyDelay && aEventType == KEYDOWNANDUP)									// Hook should never specify a delay, so no need to check if caller is hook.
 			DoKeyDelay(sSendMode == SM_PLAY ? g->PressDurationPlay : g->PressDuration); // DoKeyDelay() is not thread safe but since the hook thread should never pass true for aKeyDelay, it shouldn't be an issue.
-		if (aEventType != KEYDOWN)  // i.e. always do it for KEYDOWNANDUP
+		if (aEventType != KEYDOWN)														// i.e. always do it for KEYDOWNANDUP
 		{
 			event_flags |= KEYEVENTF_KEYUP;
 			if (put_event_into_array)
@@ -1792,11 +1800,9 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 		}
 	}
 
-	if (aDoKeyDelay) // SM_PLAY also uses DoKeyDelay(): it stores the delay item in the event array.
+	if (aDoKeyDelay)  // SM_PLAY also uses DoKeyDelay(): it stores the delay item in the event array.
 		DoKeyDelay(); // Thread-safe because only called by main thread in this mode.  See notes above.
 }
-
-
 
 void KeyEventMenuMask(KeyEventTypes aEventType, DWORD aExtraInfo)
 // Send a menu masking key event (use of this function reduces code size).
@@ -1804,12 +1810,9 @@ void KeyEventMenuMask(KeyEventTypes aEventType, DWORD aExtraInfo)
 	KeyEvent(aEventType, g_MenuMaskKeyVK, g_MenuMaskKeySC, NULL, false, aExtraInfo);
 }
 
-
-
 ///////////////////
 // Mouse related //
 ///////////////////
-
 
 BIF_DECL(BIF_Click)
 {
@@ -1826,8 +1829,6 @@ BIF_DECL(BIF_Click)
 	_f_return_empty;
 }
 
-
-
 ResultType PerformClick(LPTSTR aOptions)
 {
 	int x, y;
@@ -1838,15 +1839,13 @@ ResultType PerformClick(LPTSTR aOptions)
 
 	ParseClickOptions(aOptions, x, y, vk, event_type, repeat_count, move_offset);
 	PerformMouseCommon(repeat_count < 1 ? ACT_MOUSEMOVE : ACT_MOUSECLICK // Treat repeat-count<1 as a move (like {click}).
-		, vk, x, y, 0, 0, repeat_count, event_type, g->DefaultMouseSpeed, move_offset);
+					   ,
+					   vk, x, y, 0, 0, repeat_count, event_type, g->DefaultMouseSpeed, move_offset);
 
 	return OK; // For caller convenience.
 }
 
-
-
-void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEventTypes &aEventType
-	, int &aRepeatCount, bool &aMoveOffset)
+void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEventTypes &aEventType, int &aRepeatCount, bool &aMoveOffset)
 // Caller has trimmed leading whitespace from aOptions, but not necessarily the trailing whitespace.
 // aOptions must be a modifiable string because this function temporarily alters it.
 {
@@ -1869,8 +1868,8 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 			if (!*(next_option = omit_leading_whitespace(next_option + 1)))
 				goto break_both; // Entire option string ends in a comma.
 		// Find the end of this option item:
-		if (   !(option_end = StrChrAny(next_option, _T(" \t,")))   )  // Space, tab, comma.
-			option_end = next_option + _tcslen(next_option); // Set to position of zero terminator instead.
+		if (!(option_end = StrChrAny(next_option, _T(" \t,")))) // Space, tab, comma.
+			option_end = next_option + _tcslen(next_option);	// Set to position of zero terminator instead.
 
 		// Temp termination for IsNumeric(), ConvertMouseButton(), and peace-of-mind.
 		orig_char = *option_end;
@@ -1887,7 +1886,7 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 				aX = ATOI(next_option);
 			else if (aY == COORD_UNSPECIFIED)
 				aY = ATOI(next_option);
-			else // Third number is the repeat-count (but if there's only one number total, that's repeat count too, see further below).
+			else								  // Third number is the repeat-count (but if there's only one number total, that's repeat count too, see further below).
 				aRepeatCount = ATOI(next_option); // If negative or zero, caller knows to handle it as a MouseMove vs. Click.
 		}
 		else // Mouse button/name and/or Down/Up/Repeat-count is present.
@@ -1898,10 +1897,16 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 			{
 				switch (ctoupper(*next_option))
 				{
-				case 'D': aEventType = KEYDOWN; break;
-				case 'U': aEventType = KEYUP; break;
-				case 'R': aMoveOffset = true; break; // Since it wasn't recognized as the right mouse button, it must have other letters after it, e.g. Rel/Relative.
-				// default: Ignore anything else to reserve them for future use.
+				case 'D':
+					aEventType = KEYDOWN;
+					break;
+				case 'U':
+					aEventType = KEYUP;
+					break;
+				case 'R':
+					aMoveOffset = true;
+					break; // Since it wasn't recognized as the right mouse button, it must have other letters after it, e.g. Rel/Relative.
+					// default: Ignore anything else to reserve them for future use.
 				}
 			}
 		}
@@ -1919,21 +1924,17 @@ break_both:
 	}
 }
 
-
-
-FResult PerformMouse(ActionTypeType aActionType, optl<StrArg> aButton
-	, optl<int> aX1, optl<int> aY1, optl<int> aX2, optl<int> aY2
-	, optl<int> aSpeed, optl<StrArg> aOffsetMode, optl<int> aRepeatCount, optl<StrArg> aDownUp)
+FResult PerformMouse(ActionTypeType aActionType, optl<StrArg> aButton, optl<int> aX1, optl<int> aY1, optl<int> aX2, optl<int> aY2, optl<int> aSpeed, optl<StrArg> aOffsetMode, optl<int> aRepeatCount, optl<StrArg> aDownUp)
 {
 	vk_type vk;
 	if (aActionType == ACT_MOUSEMOVE)
 		vk = 0;
 	else
 		// ConvertMouseButton() treats omitted/blank as "Left":
-		if (   !(vk = Line::ConvertMouseButton(aButton.value_or_null(), aActionType == ACT_MOUSECLICK)))
+		if (!(vk = Line::ConvertMouseButton(aButton.value_or_null(), aActionType == ACT_MOUSECLICK)))
 			return FR_E_ARG(0); // of MouseClick/MouseClickDrag
 
-	KeyEventTypes event_type = KEYDOWNANDUP;  // Set defaults.
+	KeyEventTypes event_type = KEYDOWNANDUP; // Set defaults.
 	int repeat_count = aRepeatCount.has_value() ? *aRepeatCount : 1;
 	if (repeat_count < 0)
 		return FR_E_ARG(2); // of MouseClick
@@ -1966,29 +1967,27 @@ FResult PerformMouse(ActionTypeType aActionType, optl<StrArg> aButton
 			return FR_E_ARG(aActionType == ACT_MOUSEMOVE ? 3 : 6);
 	}
 
-	PerformMouseCommon(aActionType, vk
-		, aX1.value_or(COORD_UNSPECIFIED)  // If no starting coords are specified, mark it as "use the
-		, aY1.value_or(COORD_UNSPECIFIED)  // current mouse position":
-		, aX2.value_or(COORD_UNSPECIFIED)  // These two are non-null only for MouseClickDrag.
-		, aY2.value_or(COORD_UNSPECIFIED)  //
-		, repeat_count, event_type
-		, aSpeed.value_or(g->DefaultMouseSpeed)
-		, move_offset);
+	PerformMouseCommon(aActionType, vk, aX1.value_or(COORD_UNSPECIFIED) // If no starting coords are specified, mark it as "use the
+					   ,
+					   aY1.value_or(COORD_UNSPECIFIED) // current mouse position":
+					   ,
+					   aX2.value_or(COORD_UNSPECIFIED) // These two are non-null only for MouseClickDrag.
+					   ,
+					   aY2.value_or(COORD_UNSPECIFIED) //
+					   ,
+					   repeat_count, event_type, aSpeed.value_or(g->DefaultMouseSpeed), move_offset);
 
 	return OK;
 }
 
-
-
-void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY1, int aX2, int aY2
-	, int aRepeatCount, KeyEventTypes aEventType, int aSpeed, bool aMoveOffset)
+void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aRepeatCount, KeyEventTypes aEventType, int aSpeed, bool aMoveOffset)
 {
-	// The maximum number of events, which in this case would be from a MouseClickDrag.  To be conservative
-	// (even though INPUT is a much larger struct than PlaybackEvent and SendInput doesn't use mouse-delays),
-	// include room for the maximum number of mouse delays too.
-	// Drag consists of at most:
-	// 1) Move; 2) Delay; 3) Down; 4) Delay; 5) Move; 6) Delay; 7) Delay (dupe); 8) Up; 9) Delay.
-	#define MAX_PERFORM_MOUSE_EVENTS 10
+// The maximum number of events, which in this case would be from a MouseClickDrag.  To be conservative
+// (even though INPUT is a much larger struct than PlaybackEvent and SendInput doesn't use mouse-delays),
+// include room for the maximum number of mouse delays too.
+// Drag consists of at most:
+// 1) Move; 2) Delay; 3) Down; 4) Delay; 5) Move; 6) Delay; 7) Delay (dupe); 8) Up; 9) Delay.
+#define MAX_PERFORM_MOUSE_EVENTS 10
 	INPUT event_array[MAX_PERFORM_MOUSE_EVENTS]; // Use type INPUT vs. PlaybackEvent since the former is larger (i.e. enough to hold either one).
 
 	sSendMode = g->SendMode;
@@ -2005,10 +2004,9 @@ void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY
 	// Turn it on unconditionally even if it was on, since Ctrl-Alt-Del might have disabled it.
 	// Turn it back off only if it wasn't ON before we started.
 	bool blockinput_prev = g_BlockInput;
-	bool do_selective_blockinput = (g_BlockInputMode == TOGGLE_MOUSE || g_BlockInputMode == TOGGLE_SENDANDMOUSE)
-		&& !sSendMode;
+	bool do_selective_blockinput = (g_BlockInputMode == TOGGLE_MOUSE || g_BlockInputMode == TOGGLE_SENDANDMOUSE) && !sSendMode;
 	if (do_selective_blockinput) // It seems best NOT to use g_BlockMouseMove for this, since often times the user would want keyboard input to be disabled too, until after the mouse event is done.
-		OurBlockInput(true); // Turn it on unconditionally even if it was on, since Ctrl-Alt-Del might have disabled it.
+		OurBlockInput(true);	 // Turn it on unconditionally even if it was on, since Ctrl-Alt-Del might have disabled it.
 
 	switch (aActionType)
 	{
@@ -2032,25 +2030,22 @@ void PerformMouseCommon(ActionTypeType aActionType, vk_type aVK, int aX1, int aY
 		CleanupEventArray(final_key_delay);
 	}
 
-	if (do_selective_blockinput && !blockinput_prev)  // Turn it back off only if it was off before we started.
+	if (do_selective_blockinput && !blockinput_prev) // Turn it back off only if it was off before we started.
 		OurBlockInput(false);
 }
-
-
 
 void MouseClickDrag(vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aSpeed, bool aMoveOffset)
 {
 	// Check if one of the coordinates is missing, which can happen in cases where this was called from
 	// a source that didn't already validate it.
-	if (   (aX1 == COORD_UNSPECIFIED && aY1 != COORD_UNSPECIFIED) || (aX1 != COORD_UNSPECIFIED && aY1 == COORD_UNSPECIFIED)
-		|| (aX2 == COORD_UNSPECIFIED && aY2 != COORD_UNSPECIFIED) || (aX2 != COORD_UNSPECIFIED && aY2 == COORD_UNSPECIFIED)   )
+	if ((aX1 == COORD_UNSPECIFIED && aY1 != COORD_UNSPECIFIED) || (aX1 != COORD_UNSPECIFIED && aY1 == COORD_UNSPECIFIED) || (aX2 == COORD_UNSPECIFIED && aY2 != COORD_UNSPECIFIED) || (aX2 != COORD_UNSPECIFIED && aY2 == COORD_UNSPECIFIED))
 		return;
 
 	// I asked Jon, "Have you discovered that insta-drags almost always fail?" and he said
 	// "Yeah, it was weird, absolute lack of drag... Don't know if it was my config or what."
 	// However, testing reveals "insta-drags" work ok, at least on my system, so leaving them enabled.
 	// User can easily increase the speed if there's any problem:
-	//if (aSpeed < 2)
+	// if (aSpeed < 2)
 	//	aSpeed = 2;
 
 	// v2.0: Always translate logical buttons into physical ones.  Which physical button it becomes depends
@@ -2060,7 +2055,7 @@ void MouseClickDrag(vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aSpeed,
 		aVK = (aVK == VK_LBUTTON) ? VK_RBUTTON : VK_LBUTTON;
 
 	// MSDN: If [event_flags] is not MOUSEEVENTF_WHEEL, [MOUSEEVENTF_HWHEEL,] MOUSEEVENTF_XDOWN,
-	// or MOUSEEVENTF_XUP, then [event_data] should be zero. 
+	// or MOUSEEVENTF_XUP, then [event_data] should be zero.
 	DWORD event_down, event_up, event_flags = 0, event_data = 0; // Set defaults for some.
 	switch (aVK)
 	{
@@ -2093,16 +2088,16 @@ void MouseClickDrag(vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aSpeed,
 		// to expect mouse movement prior to a click at a *new* position, which is not unreasonable given
 		// that this would be the case 99.999% of the time if the user were moving the mouse physically.
 		MouseMove(aX1, aY1, event_flags, aSpeed, aMoveOffset); // It calls DoMouseDelay() and also converts aX1 and aY1 to MOUSEEVENTF_ABSOLUTE coordinates.
-		// v1.0.43: event_flags was added to improve reliability.  Explanation: Since the mouse was just moved to an
-		// explicitly specified set of coordinates, use those coordinates with subsequent clicks.  This has been
-		// shown to significantly improve reliability in cases where the user is moving the mouse during the
-		// MouseClick/Drag commands.
+															   // v1.0.43: event_flags was added to improve reliability.  Explanation: Since the mouse was just moved to an
+															   // explicitly specified set of coordinates, use those coordinates with subsequent clicks.  This has been
+															   // shown to significantly improve reliability in cases where the user is moving the mouse during the
+															   // MouseClick/Drag commands.
 	}
 	MouseEvent(event_flags | event_down, event_data, aX1, aY1); // It ignores aX and aY when MOUSEEVENTF_MOVE is absent.
-	DoMouseDelay(); // Inserts delay for all modes except SendInput, for which it does nothing.
+	DoMouseDelay();												// Inserts delay for all modes except SendInput, for which it does nothing.
 	// Now that the mouse button has been pushed down, move the mouse to perform the drag:
 	MouseMove(aX2, aY2, event_flags, aSpeed, aMoveOffset); // It calls DoMouseDelay() and also converts aX2 and aY2 to MOUSEEVENTF_ABSOLUTE coordinates.
-	DoMouseDelay(); // Duplicate, see below.
+	DoMouseDelay();										   // Duplicate, see below.
 	// Above is a *duplicate* delay because MouseMove() already did one. But it seems best to keep it because:
 	// 1) MouseClickDrag can be a CPU intensive operation for the target window depending on what it does
 	//    during the drag (selecting objects, etc.)  Thus, and extra delay might help a lot of things.
@@ -2117,10 +2112,7 @@ void MouseClickDrag(vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aSpeed,
 	// having been completed:
 }
 
-
-
-void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEventTypes aEventType
-	, bool aMoveOffset)
+void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEventTypes aEventType, bool aMoveOffset)
 {
 	// Check if one of the coordinates is missing, which can happen in cases where this was called from
 	// a source that didn't already validate it (such as MouseClick, %x%, %BlankVar%).
@@ -2128,8 +2120,7 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	// the number of clicks is a dereferenced script variable that may sometimes (by intent) resolve to
 	// zero or negative.  For backward compatibility, a RepeatCount <1 does not move the mouse (unlike
 	// the Click command and Send {Click}).
-	if (   (aX == COORD_UNSPECIFIED && aY != COORD_UNSPECIFIED) || (aX != COORD_UNSPECIFIED && aY == COORD_UNSPECIFIED)
-		|| (aRepeatCount < 1)   )
+	if ((aX == COORD_UNSPECIFIED && aY != COORD_UNSPECIFIED) || (aX != COORD_UNSPECIFIED && aY == COORD_UNSPECIFIED) || (aRepeatCount < 1))
 		return;
 
 	DWORD event_flags = 0; // Set default.
@@ -2142,10 +2133,10 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 		// to expect mouse movement prior to a click at a *new* position, which is not unreasonable given
 		// that this would be the case 99.999% of the time if the user were moving the mouse physically.
 		MouseMove(aX, aY, event_flags, aSpeed, aMoveOffset); // It calls DoMouseDelay() and also converts aX and aY to MOUSEEVENTF_ABSOLUTE coordinates.
-		// v1.0.43: event_flags was added to improve reliability.  Explanation: Since the mouse was just moved to an
-		// explicitly specified set of coordinates, use those coordinates with subsequent clicks.  This has been
-		// shown to significantly improve reliability in cases where the user is moving the mouse during the
-		// MouseClick/Drag commands.
+															 // v1.0.43: event_flags was added to improve reliability.  Explanation: Since the mouse was just moved to an
+															 // explicitly specified set of coordinates, use those coordinates with subsequent clicks.  This has been
+															 // shown to significantly improve reliability in cases where the user is moving the mouse during the
+															 // MouseClick/Drag commands.
 	}
 	// Above must be done prior to below because initial mouse-move is supported even for wheel turning.
 
@@ -2165,7 +2156,7 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	switch (aVK)
 	{
 	case VK_WHEEL_UP:
-		MouseEvent(event_flags | MOUSEEVENTF_WHEEL, aRepeatCount * WHEEL_DELTA, aX, aY);  // It ignores aX and aY when MOUSEEVENTF_MOVE is absent.
+		MouseEvent(event_flags | MOUSEEVENTF_WHEEL, aRepeatCount * WHEEL_DELTA, aX, aY); // It ignores aX and aY when MOUSEEVENTF_MOVE is absent.
 		return;
 	case VK_WHEEL_DOWN:
 		MouseEvent(event_flags | MOUSEEVENTF_WHEEL, -(aRepeatCount * WHEEL_DELTA), aX, aY);
@@ -2187,9 +2178,9 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	// 3) Even if that isn't true, the consequences of incorrect behavior seem minimal in this case.
 	thread_local static vk_type sWorkaroundVK = 0;
 	thread_local static LRESULT sWorkaroundHitTest; // Not initialized because the above will be the sole signal of whether the workaround is in progress.
-	DWORD event_down, event_up, event_data = 0; // Set default.
+	DWORD event_down, event_up, event_data = 0;		// Set default.
 	// MSDN: If [event_flags] is not MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, or MOUSEEVENTF_XUP, then [event_data]
-	// should be zero. 
+	// should be zero.
 
 	// v2.0: Always translate logical buttons into physical ones.  Which physical button it becomes depends
 	// on whether the mouse buttons are swapped via the Control Panel.
@@ -2213,8 +2204,8 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 		// for the other modes: because dragging the title bar of one of this thread's windows with a
 		// remap such as F1::LButton doesn't work if that remap uses SendPlay internally (the window
 		// gets stuck to the mouse cursor).
-		if (   (!sSendMode || !sEventCount) // See above.
-			&& (aEventType == KEYDOWN || (aEventType == KEYUP && sWorkaroundVK))   ) // i.e. this is a down-only event or up-only event.
+		if ((!sSendMode || !sEventCount)										  // See above.
+			&& (aEventType == KEYDOWN || (aEventType == KEYUP && sWorkaroundVK))) // i.e. this is a down-only event or up-only event.
 		{
 			// v1.0.40.01: The following section corrects misbehavior caused by a thread sending
 			// simulated mouse clicks to one of its own windows.  A script consisting only of the
@@ -2266,14 +2257,13 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 			// Despite what MSDN says, WindowFromPoint() appears to fetch a non-NULL value even when the
 			// mouse is hovering over a disabled control (at least on XP).
 			HWND child_under_cursor, parent_under_cursor;
-			if (   (child_under_cursor = WindowFromPoint(point))
-				&& (parent_under_cursor = GetNonChildParent(child_under_cursor)) // WM_NCHITTEST below probably requires parent vs. child.
-				&& GetWindowThreadProcessId(parent_under_cursor, NULL) == g_MainThreadID   ) // It's one of our thread's windows.
+			if ((child_under_cursor = WindowFromPoint(point)) && (parent_under_cursor = GetNonChildParent(child_under_cursor)) // WM_NCHITTEST below probably requires parent vs. child.
+				&& GetWindowThreadProcessId(parent_under_cursor, NULL) == g_MainThreadID)									   // It's one of our thread's windows.
 			{
 				LRESULT hit_test = SendMessage(parent_under_cursor, WM_NCHITTEST, 0, MAKELPARAM(point.x, point.y));
-				if (   aVK == VK_LBUTTON && (hit_test == HTCLOSE || hit_test == HTMAXBUTTON // Title bar buttons: Close, Maximize.
-						|| hit_test == HTMINBUTTON || hit_test == HTHELP) // Title bar buttons: Minimize, Help.
-					|| aVK == VK_RBUTTON && (hit_test == HTCAPTION || hit_test == HTSYSMENU)   )
+				if (aVK == VK_LBUTTON && (hit_test == HTCLOSE || hit_test == HTMAXBUTTON	// Title bar buttons: Close, Maximize.
+										  || hit_test == HTMINBUTTON || hit_test == HTHELP) // Title bar buttons: Minimize, Help.
+					|| aVK == VK_RBUTTON && (hit_test == HTCAPTION || hit_test == HTSYSMENU))
 				{
 					if (aEventType == KEYDOWN)
 					{
@@ -2288,8 +2278,8 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 					else // KEYUP
 					{
 						if (sWorkaroundHitTest == hit_test) // To weed out cases where user clicked down on a button then released somewhere other than the button.
-							aEventType = KEYDOWNANDUP; // Translate this click-up into down+up to make up for the fact that the down was previously suppressed.
-						//else let the click-up occur in case it does something or user wants it.
+							aEventType = KEYDOWNANDUP;		// Translate this click-up into down+up to make up for the fact that the down was previously suppressed.
+															// else let the click-up occur in case it does something or user wants it.
 					}
 				}
 			} // Work-around for sending mouse clicks to one of our thread's own windows.
@@ -2356,8 +2346,6 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	sWorkaroundVK = 0; // Reset this indicator in all cases except those for which above already returned.
 }
 
-
-
 void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffset)
 // This function also does DoMouseDelay() for the caller.
 // This function converts aX and aY for the caller into MOUSEEVENTF_ABSOLUTE coordinates.
@@ -2390,8 +2378,7 @@ void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffse
 		// during playback, or the active window changes position -- if that were to happen, the offset would
 		// otherwise be wrong while CoordMode is Relative because the changes can only be observed and
 		// compensated for during playback.
-		PutMouseEventIntoArray(MOUSEEVENTF_MOVE | (aMoveOffset ? MSG_OFFSET_MOUSE_MOVE : 0)
-			, 0, aX, aY); // The playback hook uses normal vs. MOUSEEVENTF_ABSOLUTE coordinates.
+		PutMouseEventIntoArray(MOUSEEVENTF_MOVE | (aMoveOffset ? MSG_OFFSET_MOUSE_MOVE : 0), 0, aX, aY); // The playback hook uses normal vs. MOUSEEVENTF_ABSOLUTE coordinates.
 		DoMouseDelay();
 		if (aMoveOffset)
 		{
@@ -2407,14 +2394,14 @@ void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffse
 	aEventFlags |= MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE; // Done here for caller, for easier maintenance.
 
 	POINT cursor_pos;
-	if (aMoveOffset)  // We're moving the mouse cursor relative to its current position.
+	if (aMoveOffset) // We're moving the mouse cursor relative to its current position.
 	{
 		if (sSendMode == SM_INPUT)
 		{
 			// Since GetCursorPos() can't be called to find out a future cursor position, use the position
 			// tracked for SendInput (facilitates MouseClickDrag's R-option as well as Send{Click}'s).
 			if (sSendInputCursorPos.x == COORD_UNSPECIFIED) // Initial/starting value hasn't yet been set.
-				GetCursorPos(&sSendInputCursorPos); // Start it off where the cursor is now.
+				GetCursorPos(&sSendInputCursorPos);			// Start it off where the cursor is now.
 			aX += sSendInputCursorPos.x;
 			aY += sSendInputCursorPos.y;
 		}
@@ -2435,7 +2422,7 @@ void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffse
 	if (sSendMode == SM_INPUT) // Track predicted cursor position for use by subsequent events put into the array.
 	{
 		sSendInputCursorPos.x = aX; // Always stores normal coords (non-MOUSEEVENTF_ABSOLUTE).
-		sSendInputCursorPos.y = aY; // 
+		sSendInputCursorPos.y = aY; //
 	}
 
 	// Find dimensions of primary monitor.
@@ -2444,41 +2431,40 @@ void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffse
 	int screen_width = GetSystemMetrics(SM_CXSCREEN);
 	int screen_height = GetSystemMetrics(SM_CYSCREEN);
 
-	// Convert the specified screen coordinates to mouse event coordinates (MOUSEEVENTF_ABSOLUTE).
-	// MSDN: "In a multimonitor system, [MOUSEEVENTF_ABSOLUTE] coordinates map to the primary monitor."
-	// The above implies that values greater than 65535 or less than 0 are appropriate, but only on
-	// multi-monitor systems.  For simplicity, performance, and backward compatibility, no check for
-	// multi-monitor is done here. Instead, the system's default handling for out-of-bounds coordinates
-	// is used; for example, mouse_event() stops the cursor at the edge of the screen.
-	// UPDATE: In v1.0.43, the following formula was fixed (actually broken, see below) to always yield an
-	// in-range value. The previous formula had a +1 at the end:
-	// aX|Y = ((65535 * aX|Y) / (screen_width|height - 1)) + 1;
-	// The extra +1 would produce 65536 (an out-of-range value for a single-monitor system) if the maximum
-	// X or Y coordinate was input (e.g. x-position 1023 on a 1024x768 screen).  Although this correction
-	// seems inconsequential on single-monitor systems, it may fix certain misbehaviors that have been reported
-	// on multi-monitor systems. Update: according to someone I asked to test it, it didn't fix anything on
-	// multimonitor systems, at least those whose monitors vary in size to each other.  In such cases, he said
-	// that only SendPlay or DllCall("SetCursorPos") make mouse movement work properly.
-	// FIX for v1.0.44: Although there's no explanation yet, the v1.0.43 formula is wrong and the one prior
-	// to it was correct; i.e. unless +1 is present below, a mouse movement to coords near the upper-left corner of
-	// the screen is typically off by one pixel (only the y-coordinate is affected in 1024x768 resolution, but
-	// in other resolutions both might be affected).
-	// v1.0.44.07: The following old formula has been replaced:
-	// (((65535 * coord) / (width_or_height - 1)) + 1)
-	// ... with the new one below.  This is based on numEric's research, which indicates that mouse_event()
-	// uses the following inverse formula internally:
-	// x_or_y_coord = (x_or_y_abs_coord * screen_width_or_height) / 65536
-	#define MOUSE_COORD_TO_ABS(coord, width_or_height) (((65536 * coord) / width_or_height) + (coord < 0 ? -1 : 1))
+// Convert the specified screen coordinates to mouse event coordinates (MOUSEEVENTF_ABSOLUTE).
+// MSDN: "In a multimonitor system, [MOUSEEVENTF_ABSOLUTE] coordinates map to the primary monitor."
+// The above implies that values greater than 65535 or less than 0 are appropriate, but only on
+// multi-monitor systems.  For simplicity, performance, and backward compatibility, no check for
+// multi-monitor is done here. Instead, the system's default handling for out-of-bounds coordinates
+// is used; for example, mouse_event() stops the cursor at the edge of the screen.
+// UPDATE: In v1.0.43, the following formula was fixed (actually broken, see below) to always yield an
+// in-range value. The previous formula had a +1 at the end:
+// aX|Y = ((65535 * aX|Y) / (screen_width|height - 1)) + 1;
+// The extra +1 would produce 65536 (an out-of-range value for a single-monitor system) if the maximum
+// X or Y coordinate was input (e.g. x-position 1023 on a 1024x768 screen).  Although this correction
+// seems inconsequential on single-monitor systems, it may fix certain misbehaviors that have been reported
+// on multi-monitor systems. Update: according to someone I asked to test it, it didn't fix anything on
+// multimonitor systems, at least those whose monitors vary in size to each other.  In such cases, he said
+// that only SendPlay or DllCall("SetCursorPos") make mouse movement work properly.
+// FIX for v1.0.44: Although there's no explanation yet, the v1.0.43 formula is wrong and the one prior
+// to it was correct; i.e. unless +1 is present below, a mouse movement to coords near the upper-left corner of
+// the screen is typically off by one pixel (only the y-coordinate is affected in 1024x768 resolution, but
+// in other resolutions both might be affected).
+// v1.0.44.07: The following old formula has been replaced:
+// (((65535 * coord) / (width_or_height - 1)) + 1)
+// ... with the new one below.  This is based on numEric's research, which indicates that mouse_event()
+// uses the following inverse formula internally:
+// x_or_y_coord = (x_or_y_abs_coord * screen_width_or_height) / 65536
+#define MOUSE_COORD_TO_ABS(coord, width_or_height) (((65536 * coord) / width_or_height) + (coord < 0 ? -1 : 1))
 	aX = MOUSE_COORD_TO_ABS(aX, screen_width);
 	aY = MOUSE_COORD_TO_ABS(aY, screen_height);
 	// aX and aY MUST BE SET UNCONDITIONALLY because the output parameters must be updated for caller.
 	// The incremental-move section further below also needs it.
 
-	if (aSpeed < 0)  // This can happen during script's runtime due to something like: MouseMove, X, Y, %VarContainingNegative%
-		aSpeed = 0;  // 0 is the fastest.
-	else
-		if (aSpeed > MAX_MOUSE_SPEED)
-			aSpeed = MAX_MOUSE_SPEED;
+	if (aSpeed < 0) // This can happen during script's runtime due to something like: MouseMove, X, Y, %VarContainingNegative%
+		aSpeed = 0; // 0 is the fastest.
+	else if (aSpeed > MAX_MOUSE_SPEED)
+		aSpeed = MAX_MOUSE_SPEED;
 	if (aSpeed == 0 || sSendMode == SM_INPUT) // Instantaneous move to destination coordinates with no incremental positions in between.
 	{
 		// See the comments in the playback-mode section at the top of this function for why SM_INPUT ignores aSpeed.
@@ -2492,12 +2478,12 @@ void MouseMove(int &aX, int &aY, DWORD &aEventFlags, int aSpeed, bool aMoveOffse
 	// Convert the cursor's current position to mouse event coordinates (MOUSEEVENTF_ABSOLUTE).
 	GetCursorPos(&cursor_pos);
 	DoIncrementalMouseMove(
-		  MOUSE_COORD_TO_ABS(cursor_pos.x, screen_width)  // Source/starting coords.
-		, MOUSE_COORD_TO_ABS(cursor_pos.y, screen_height) //
-		, aX, aY, aSpeed);                                // Destination/ending coords.
+		MOUSE_COORD_TO_ABS(cursor_pos.x, screen_width) // Source/starting coords.
+		,
+		MOUSE_COORD_TO_ABS(cursor_pos.y, screen_height) //
+		,
+		aX, aY, aSpeed); // Destination/ending coords.
 }
-
-
 
 void MouseEvent(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 // Having this part outsourced to a function helps remember to use KEY_IGNORE so that our own mouse
@@ -2506,12 +2492,12 @@ void MouseEvent(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 	if (sSendMode)
 		PutMouseEventIntoArray(aEventFlags, aData, aX, aY);
 	else
-		mouse_event(aEventFlags
-			, aX == COORD_UNSPECIFIED ? 0 : aX // v1.0.43.01: Must be zero if no change in position is desired
-			, aY == COORD_UNSPECIFIED ? 0 : aY // (fixes compatibility with certain apps/games).
-			, aData, KEY_IGNORE_LEVEL(g->SendLevel));
+		mouse_event(aEventFlags, aX == COORD_UNSPECIFIED ? 0 : aX // v1.0.43.01: Must be zero if no change in position is desired
+					,
+					aY == COORD_UNSPECIFIED ? 0 : aY // (fixes compatibility with certain apps/games).
+					,
+					aData, KEY_IGNORE_LEVEL(g->SendLevel));
 }
-
 
 ///////////////////////
 // SUPPORT FUNCTIONS //
@@ -2557,14 +2543,14 @@ void PutKeybdEventIntoArray(modLR_type aKeyAsModifiersLR, vk_type aVK, sc_type a
 		this_event.ki.wVk = aVK;
 		this_event.ki.wScan = (aEventFlags & KEYEVENTF_UNICODE) ? aSC : LOBYTE(aSC);
 		this_event.ki.dwFlags = aEventFlags;
-		this_event.ki.dwExtraInfo = aExtraInfo; // Although our hook won't be installed (or won't detect, in the case of playback), that of other scripts might be, so set this for them.
-		this_event.ki.time = 0; // Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
+		this_event.ki.dwExtraInfo = aExtraInfo;		 // Although our hook won't be installed (or won't detect, in the case of playback), that of other scripts might be, so set this for them.
+		this_event.ki.time = 0;						 // Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
 		sHooksToRemoveDuringSendInput |= HOOK_KEYBD; // Presence of keyboard hook defeats uninterruptibility of keystrokes.
 	}
 	else // Playback hook.
 	{
 		PlaybackEvent &this_event = sEventPB[sEventCount]; // For performance and convenience.
-		if (!(aVK || aSC)) // Caller is signaling that aExtraInfo contains a delay/sleep event.
+		if (!(aVK || aSC))								   // Caller is signaling that aExtraInfo contains a delay/sleep event.
 		{
 			// Although delays at the tail end of the playback array can't be implemented by the playback
 			// itself, caller wants them put in too.
@@ -2590,9 +2576,9 @@ void PutKeybdEventIntoArray(modLR_type aKeyAsModifiersLR, vk_type aVK, sc_type a
 			// isn't F10, or if Ctrl is down. Though a press of the Alt key itself is a syskey unless Ctrl is down.
 			// Update: The release of ALT is WM_KEYUP vs. WM_SYSKEYUP when it modified at least one key while it was down.
 			if (sEventModifiersLR & (MOD_LCONTROL | MOD_RCONTROL) // Control is down...
-				|| !(sEventModifiersLR & (MOD_LALT | MOD_RALT))   // ... or: Alt isn't down and this key isn't Alt or F10...
-					&& aVK != VK_F10 && !(aKeyAsModifiersLR & (MOD_LALT | MOD_RALT))
-				|| (sEventModifiersLR & (MOD_LALT | MOD_RALT)) && key_up) // ... or this is the release of Alt (for simplicity, assume that Alt modified something while it was down).
+				|| !(sEventModifiersLR & (MOD_LALT | MOD_RALT))	  // ... or: Alt isn't down and this key isn't Alt or F10...
+					   && aVK != VK_F10 && !(aKeyAsModifiersLR & (MOD_LALT | MOD_RALT)) ||
+				(sEventModifiersLR & (MOD_LALT | MOD_RALT)) && key_up) // ... or this is the release of Alt (for simplicity, assume that Alt modified something while it was down).
 				this_event.message = key_up ? WM_KEYUP : WM_KEYDOWN;
 			else
 				this_event.message = key_up ? WM_SYSKEYUP : WM_SYSKEYDOWN;
@@ -2602,8 +2588,6 @@ void PutKeybdEventIntoArray(modLR_type aKeyAsModifiersLR, vk_type aVK, sc_type a
 	}
 	++sEventCount;
 }
-
-
 
 void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 // This function is designed to be called from only one thread (the main thread) since it's not thread-safe.
@@ -2623,8 +2607,8 @@ void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 		this_event.mi.dwFlags = aEventFlags;
 		this_event.mi.mouseData = aData;
 		this_event.mi.dwExtraInfo = KEY_IGNORE_LEVEL(g->SendLevel); // Although our hook won't be installed (or won't detect, in the case of playback), that of other scripts might be, so set this for them.
-		this_event.mi.time = 0; // Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
-		sHooksToRemoveDuringSendInput |= HOOK_MOUSE; // Presence of mouse hook defeats uninterruptibility of mouse clicks/moves.
+		this_event.mi.time = 0;										// Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
+		sHooksToRemoveDuringSendInput |= HOOK_MOUSE;				// Presence of mouse hook defeats uninterruptibility of mouse clicks/moves.
 	}
 	else // Playback hook.
 	{
@@ -2641,22 +2625,44 @@ void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 		// Bits are isolated in what should be a future-proof way (also omits MSG_OFFSET_MOUSE_MOVE bit).
 		switch (aEventFlags & (0x1FFF & ~MOUSEEVENTF_MOVE)) // v1.0.48: 0x1FFF vs. 0xFFF to support MOUSEEVENTF_HWHEEL.
 		{
-		case 0:                      this_event.message = WM_MOUSEMOVE; break; // It's a movement without a click.
+		case 0:
+			this_event.message = WM_MOUSEMOVE;
+			break; // It's a movement without a click.
 		// In cases other than the above, it's a click or wheel turn with optional WM_MOUSEMOVE too.
-		case MOUSEEVENTF_LEFTDOWN:   this_event.message = WM_LBUTTONDOWN; break;
-		case MOUSEEVENTF_LEFTUP:     this_event.message = WM_LBUTTONUP; break;
-		case MOUSEEVENTF_RIGHTDOWN:  this_event.message = WM_RBUTTONDOWN; break;
-		case MOUSEEVENTF_RIGHTUP:    this_event.message = WM_RBUTTONUP; break;
-		case MOUSEEVENTF_MIDDLEDOWN: this_event.message = WM_MBUTTONDOWN; break;
-		case MOUSEEVENTF_MIDDLEUP:   this_event.message = WM_MBUTTONUP; break;
-		case MOUSEEVENTF_XDOWN:      this_event.message = WM_XBUTTONDOWN; break;
-		case MOUSEEVENTF_XUP:        this_event.message = WM_XBUTTONUP; break;
-		case MOUSEEVENTF_WHEEL:      this_event.message = WM_MOUSEWHEEL; break;
-		case MOUSEEVENTF_HWHEEL:     this_event.message = WM_MOUSEHWHEEL; break; // v1.0.48
-		// WHEEL: No info comes into journal-record about which direction the wheel was turned (nor by how many
-		// notches).  In addition, it appears impossible to specify such info when playing back the event.
-		// Therefore, playback usually produces downward wheel movement (but upward in some apps like
-		// Visual Studio).
+		case MOUSEEVENTF_LEFTDOWN:
+			this_event.message = WM_LBUTTONDOWN;
+			break;
+		case MOUSEEVENTF_LEFTUP:
+			this_event.message = WM_LBUTTONUP;
+			break;
+		case MOUSEEVENTF_RIGHTDOWN:
+			this_event.message = WM_RBUTTONDOWN;
+			break;
+		case MOUSEEVENTF_RIGHTUP:
+			this_event.message = WM_RBUTTONUP;
+			break;
+		case MOUSEEVENTF_MIDDLEDOWN:
+			this_event.message = WM_MBUTTONDOWN;
+			break;
+		case MOUSEEVENTF_MIDDLEUP:
+			this_event.message = WM_MBUTTONUP;
+			break;
+		case MOUSEEVENTF_XDOWN:
+			this_event.message = WM_XBUTTONDOWN;
+			break;
+		case MOUSEEVENTF_XUP:
+			this_event.message = WM_XBUTTONUP;
+			break;
+		case MOUSEEVENTF_WHEEL:
+			this_event.message = WM_MOUSEWHEEL;
+			break;
+		case MOUSEEVENTF_HWHEEL:
+			this_event.message = WM_MOUSEHWHEEL;
+			break; // v1.0.48
+			// WHEEL: No info comes into journal-record about which direction the wheel was turned (nor by how many
+			// notches).  In addition, it appears impossible to specify such info when playing back the event.
+			// Therefore, playback usually produces downward wheel movement (but upward in some apps like
+			// Visual Studio).
 		}
 		// COORD_UNSPECIFIED_SHORT is used so that the very first event can be a click with unspecified
 		// coordinates: it seems best to have the cursor's position fetched during playback rather than
@@ -2670,14 +2676,12 @@ void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 	++sEventCount;
 }
 
-
-
 ResultType ExpandEventArray()
 // Returns OK or FAIL.
 {
 	if (sAbortArraySend) // A prior call failed (might be impossible).  Avoid malloc() in this case.
 		return FAIL;
-	#define EVENT_EXPANSION_MULTIPLIER 2  // Should be very rare for array to need to expand more than a few times.
+#define EVENT_EXPANSION_MULTIPLIER 2 // Should be very rare for array to need to expand more than a few times.
 	size_t event_size = (sSendMode == SM_INPUT) ? sizeof(INPUT) : sizeof(PlaybackEvent);
 	void *new_mem;
 	// SendInput() appears to be limited to 5000 chars (10000 events in array), at least on XP.  This is
@@ -2687,7 +2691,7 @@ ResultType ExpandEventArray()
 	// even when the ones beyond the limit were clearly never received by the target window.
 	// In any case, it seems best not to restrict to 5000 here in case the limit can vary for any reason.
 	// The 5000 limit is documented in the help file.
-	if (   !(new_mem = malloc(EVENT_EXPANSION_MULTIPLIER * sMaxEvents * event_size))   )
+	if (!(new_mem = malloc(EVENT_EXPANSION_MULTIPLIER * sMaxEvents * event_size)))
 	{
 		sAbortArraySend = true; // Usually better to send nothing rather than partial.
 		// Leave sEventSI and sMaxEvents in their current valid state, to be freed by CleanupEventArray().
@@ -2696,13 +2700,11 @@ ResultType ExpandEventArray()
 	else // Copy old array into new memory area (note that sEventSI and sEventPB are different views of the same variable).
 		memcpy(new_mem, sEventSI, sEventCount * event_size);
 	if (sMaxEvents > (sSendMode == SM_INPUT ? MAX_INITIAL_EVENTS_SI : MAX_INITIAL_EVENTS_PB))
-		free(sEventSI); // Previous block was malloc'd vs. _alloc'd, so free it.
+		free(sEventSI);			 // Previous block was malloc'd vs. _alloc'd, so free it.
 	sEventSI = (LPINPUT)new_mem; // Note that sEventSI and sEventPB are different views of the same variable.
 	sMaxEvents *= EVENT_EXPANSION_MULTIPLIER;
 	return OK;
 }
-
-
 
 void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR)
 {
@@ -2718,8 +2720,6 @@ void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR)
 	// The above isn't a local static inside PlaybackProc because PlaybackProc might get aborted in the
 	// middle of a NEXT/SKIP pair by user pressing Ctrl-Esc, etc, which would make it unreliable.
 }
-
-
 
 void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 // aFinalKeyDelay (which the caller should have initialized to -1 prior to calling) may be changed here
@@ -2792,11 +2792,11 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 				modLR_type mods_current = GetModifierLRState(true); // This also serves to correct the hook's logical modifiers, since hook was absent during the SendInput.
 				modLR_type mods_changed_physically_during_send = aModsDuringSend ^ mods_current;
 				g_modifiersLR_physical &= ~(mods_changed_physically_during_send & aModsDuringSend); // Remove those that changed from down to up.
-				g_modifiersLR_physical |= mods_changed_physically_during_send & mods_current; // Add those that changed from up to down.
-				g_modifiersLR_logical = g_modifiersLR_logical_non_ignored = mods_current; // Necessary for hotkeys to be recognized correctly if modifiers were sent.
-				g_HShwnd = GetForegroundWindow(); // An item done by ResetHook() that seems worthwhile here.
-				// Most other things done by ResetHook() seem like they would do more harm than good to reset here
-				// because of the the time the hook is typically missing is very short, usually under 30ms.
+				g_modifiersLR_physical |= mods_changed_physically_during_send & mods_current;		// Add those that changed from up to down.
+				g_modifiersLR_logical = g_modifiersLR_logical_non_ignored = mods_current;			// Necessary for hotkeys to be recognized correctly if modifiers were sent.
+				g_HShwnd = GetForegroundWindow();													// An item done by ResetHook() that seems worthwhile here.
+																									// Most other things done by ResetHook() seem like they would do more harm than good to reset here
+																									// because of the the time the hook is typically missing is very short, usually under 30ms.
 			}
 			AddRemoveHooks(active_hooks, true); // Restore the hooks that were active before the SendInput.
 		}
@@ -2816,7 +2816,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 	// until after the playback is done.  Preliminary testing shows that the hook's disguise of Alt/Win
 	// still function properly for Win/Alt hotkeys that use the playback method.
 	sCurrentEvent = 0; // Reset for use by the hook below.  Should be done BEFORE the hook is installed in the next line.
-	if (   !(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALPLAYBACK, PlaybackProc, g_hInstance, 0))   )
+	if (!(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALPLAYBACK, PlaybackProc, g_hInstance, 0)))
 		return;
 	// During playback, have the keybd hook (if it's installed) block presses of the Windows key.
 	// This is done because the Windows key is about the only key (other than Ctrl-Esc or Ctrl-Alt-Del)
@@ -2866,8 +2866,6 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 	// actually hit the active window until the playback finishes).
 }
 
-
-
 void CleanupEventArray(int aFinalKeyDelay)
 {
 	if (sMaxEvents > (sSendMode == SM_INPUT ? MAX_INITIAL_EVENTS_SI : MAX_INITIAL_EVENTS_PB))
@@ -2878,10 +2876,7 @@ void CleanupEventArray(int aFinalKeyDelay)
 	DoKeyDelay(aFinalKeyDelay); // Do this only after resetting sSendMode above.  Should be okay for mouse events too.
 }
 
-
-
 /////////////////////////////////
-
 
 void DoKeyDelay(int aDelay)
 // Doesn't need to be thread safe because it should only ever be called from main thread.
@@ -2890,15 +2885,13 @@ void DoKeyDelay(int aDelay)
 		return;
 	if (sSendMode)
 	{
-		if (sSendMode == SM_PLAY && aDelay > 0) // Zero itself isn't supported by playback hook, so no point in inserting such delays into the array.
+		if (sSendMode == SM_PLAY && aDelay > 0)			// Zero itself isn't supported by playback hook, so no point in inserting such delays into the array.
 			PutKeybdEventIntoArray(0, 0, 0, 0, aDelay); // Passing zero for vk and sc signals it that aExtraInfo contains the delay.
-		//else for other types of arrays, never insert a delay or do one now.
+		// else for other types of arrays, never insert a delay or do one now.
 		return;
 	}
 	SLEEP_WITHOUT_INTERRUPTION(aDelay);
 }
-
-
 
 void DoMouseDelay() // Helper function for the mouse functions below.
 {
@@ -2907,10 +2900,10 @@ void DoMouseDelay() // Helper function for the mouse functions below.
 		return;
 	if (sSendMode)
 	{
-		if (sSendMode == SM_PLAY && mouse_delay > 0) // Zero itself isn't supported by playback hook, so no point in inserting such delays into the array.
+		if (sSendMode == SM_PLAY && mouse_delay > 0)		 // Zero itself isn't supported by playback hook, so no point in inserting such delays into the array.
 			PutKeybdEventIntoArray(0, 0, 0, 0, mouse_delay); // Passing zero for vk and sc signals it that aExtraInfo contains the delay.
-		//else for other types of arrays, never insert a delay or do one now (caller should have already
-		// checked that, so it's written this way here only for maintainability).
+		// else for other types of arrays, never insert a delay or do one now (caller should have already
+		//  checked that, so it's written this way here only for maintainability).
 		return;
 	}
 	// I believe the varying sleep methods below were put in place to avoid issues when simulating
@@ -2926,8 +2919,6 @@ void DoMouseDelay() // Helper function for the mouse functions below.
 	else
 		SLEEP_WITHOUT_INTERRUPTION(mouse_delay)
 }
-
-
 
 void UpdateKeyEventHistory(bool aKeyUp, vk_type aVK, sc_type aSC)
 {
@@ -2955,8 +2946,6 @@ void UpdateKeyEventHistory(bool aKeyUp, vk_type aVK, sc_type aSC)
 		g_KeyHistoryNext = 0;
 }
 
-
-
 // Allocates or resizes and resets g_KeyHistory.
 // Must be called from the hook thread if it's running, otherwise it can be called from the main thread.
 void SetKeyHistoryMax(int aMax)
@@ -2975,8 +2964,6 @@ void SetKeyHistoryMax(int aMax)
 	g_KeyHistoryNext = 0;
 }
 
-
-
 ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 // Toggle the given aVK into another state.  For performance, it is the caller's responsibility to
 // ensure that aVK is a toggleable key such as capslock, numlock, insert, or scrolllock.
@@ -2988,7 +2975,7 @@ ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 		return starting_state;
 	if (starting_state == aToggleValue) // It's already in the desired state, so just return the state.
 		return starting_state;
-	//if (aVK == VK_NUMLOCK) // v1.1.22.05: This also applies to CapsLock and ScrollLock.
+	// if (aVK == VK_NUMLOCK) // v1.1.22.05: This also applies to CapsLock and ScrollLock.
 	{
 		// If the key is being held down, sending a KEYDOWNANDUP won't change its toggle
 		// state unless the key is "released" first.  This has been confirmed for NumLock,
@@ -3024,12 +3011,11 @@ ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 		// the OS is configured to turn Capslock off only in response to pressing the SHIFT key (via Ctrl Panel's
 		// Regional settings).  So send shift to do it instead:
 		KeyEvent(KEYDOWNANDUP, VK_SHIFT);
-		if (our_thread_is_foreground) // v1.0.43: Added to try to achieve 100% reliability in all situations.
+		if (our_thread_is_foreground)		// v1.0.43: Added to try to achieve 100% reliability in all situations.
 			SLEEP_WITHOUT_INTERRUPTION(-1); // Check msg queue to put SHIFT's turning off of Capslock into effect from our thread's POV.
 	}
 	return starting_state;
 }
-
 
 /*
 void SetKeyState (vk_type vk, int aKeyUp)
@@ -3042,10 +3028,7 @@ void SetKeyState (vk_type vk, int aKeyUp)
 }
 */
 
-
-
-void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, HWND aTargetWindow
-	, bool aDisguiseDownWinAlt, bool aDisguiseUpWinAlt, DWORD aExtraInfo)
+void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, HWND aTargetWindow, bool aDisguiseDownWinAlt, bool aDisguiseUpWinAlt, DWORD aExtraInfo)
 // This function is designed to be called from only the main thread; it's probably not thread-safe.
 // Puts modifiers into the specified state, releasing or pressing down keys as needed.
 // The modifiers are released and pressed down in a very delicate order due to their interactions with
@@ -3060,7 +3043,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 // at the bottom.
 {
 	if (aModifiersLRnow == aModifiersLRnew) // They're already in the right state, so avoid doing all the checks.
-		return; // Especially avoids the aTargetWindow check at the bottom.
+		return;								// Especially avoids the aTargetWindow check at the bottom.
 
 	// Notes about modifier key behavior on Windows XP (these probably apply to NT/2k also, and has also
 	// been tested to be true on Win98): The WIN and ALT keys are the problem keys, because if either is
@@ -3110,24 +3093,24 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// Set up some conditions so that the keystrokes that disguise the release of Win or Alt
 	// are only sent when necessary (which helps avoid complications caused by keystroke interaction,
 	// while improving performance):
-	modLR_type aModifiersLRunion = aModifiersLRnow | aModifiersLRnew; // The set of keys that were or will be down.
-	bool ctrl_not_down = !(aModifiersLRnow & (MOD_LCONTROL | MOD_RCONTROL)); // Neither CTRL key is down now.
-	bool ctrl_will_not_be_down = !(aModifiersLRnew & (MOD_LCONTROL | MOD_RCONTROL)) // Nor will it be.
-		&& !(sTargetLayoutHasAltGr == CONDITION_TRUE && (aModifiersLRnew & MOD_RALT)); // Nor will it be pushed down indirectly due to AltGr.
+	modLR_type aModifiersLRunion = aModifiersLRnow | aModifiersLRnew;											// The set of keys that were or will be down.
+	bool ctrl_not_down = !(aModifiersLRnow & (MOD_LCONTROL | MOD_RCONTROL));									// Neither CTRL key is down now.
+	bool ctrl_will_not_be_down = !(aModifiersLRnew & (MOD_LCONTROL | MOD_RCONTROL))								// Nor will it be.
+								 && !(sTargetLayoutHasAltGr == CONDITION_TRUE && (aModifiersLRnew & MOD_RALT)); // Nor will it be pushed down indirectly due to AltGr.
 
-	bool ctrl_nor_shift_nor_alt_down = ctrl_not_down                             // Neither CTRL key is down now.
-		&& !(aModifiersLRnow & (MOD_LSHIFT | MOD_RSHIFT | MOD_LALT | MOD_RALT)); // Nor is any SHIFT/ALT key.
+	bool ctrl_nor_shift_nor_alt_down = ctrl_not_down															// Neither CTRL key is down now.
+									   && !(aModifiersLRnow & (MOD_LSHIFT | MOD_RSHIFT | MOD_LALT | MOD_RALT)); // Nor is any SHIFT/ALT key.
 
-	bool ctrl_or_shift_or_alt_will_be_down = !ctrl_will_not_be_down             // CTRL will be down.
-		|| (aModifiersLRnew & (MOD_LSHIFT | MOD_RSHIFT | MOD_LALT | MOD_RALT)); // or SHIFT or ALT will be.
+	bool ctrl_or_shift_or_alt_will_be_down = !ctrl_will_not_be_down													 // CTRL will be down.
+											 || (aModifiersLRnew & (MOD_LSHIFT | MOD_RSHIFT | MOD_LALT | MOD_RALT)); // or SHIFT or ALT will be.
 
 	// If the required disguise keys aren't down now but will be, defer the release of Win and/or Alt
 	// until after the disguise keys are in place (since in that case, the caller wanted them down
 	// as part of the normal operation here):
 	bool defer_win_release = ctrl_nor_shift_nor_alt_down && ctrl_or_shift_or_alt_will_be_down;
-	bool defer_alt_release = ctrl_not_down && !ctrl_will_not_be_down;  // i.e. Ctrl not down but it will be.
-	bool release_shift_before_alt_ctrl = defer_alt_release // i.e. Control is moving into the down position or...
-		|| !(aModifiersLRnow & (MOD_LALT | MOD_RALT)) && (aModifiersLRnew & (MOD_LALT | MOD_RALT)); // ...Alt is moving into the down position.
+	bool defer_alt_release = ctrl_not_down && !ctrl_will_not_be_down;																 // i.e. Ctrl not down but it will be.
+	bool release_shift_before_alt_ctrl = defer_alt_release																			 // i.e. Control is moving into the down position or...
+										 || !(aModifiersLRnow & (MOD_LALT | MOD_RALT)) && (aModifiersLRnew & (MOD_LALT | MOD_RALT)); // ...Alt is moving into the down position.
 	// Concerning "release_shift_before_alt_ctrl" above: Its purpose is to prevent unwanted firing of the OS's
 	// language bar hotkey.  See the bottom of this function for more explanation.
 
@@ -3137,10 +3120,8 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// WIN: The WIN key is successfully disguised under a greater number of conditions than ALT.
 	// Since SendPlay can't display Start Menu, there's no need to send the disguise-keystrokes (such
 	// keystrokes might cause unwanted effects in certain games):
-	bool disguise_win_down = aDisguiseDownWinAlt && sSendMode != SM_PLAY
-		&& ctrl_not_down && ctrl_will_not_be_down
-		&& !(aModifiersLRunion & (MOD_LSHIFT | MOD_RSHIFT)) // And neither SHIFT key is down, nor will it be.
-		&& !(aModifiersLRunion & (MOD_LALT | MOD_RALT));    // And neither ALT key is down, nor will it be.
+	bool disguise_win_down = aDisguiseDownWinAlt && sSendMode != SM_PLAY && ctrl_not_down && ctrl_will_not_be_down && !(aModifiersLRunion & (MOD_LSHIFT | MOD_RSHIFT)) // And neither SHIFT key is down, nor will it be.
+							 && !(aModifiersLRunion & (MOD_LALT | MOD_RALT));																						   // And neither ALT key is down, nor will it be.
 
 	bool release_lwin = (aModifiersLRnow & MOD_LWIN) && !(aModifiersLRnew & MOD_LWIN);
 	bool release_rwin = (aModifiersLRnow & MOD_RWIN) && !(aModifiersLRnew & MOD_RWIN);
@@ -3174,11 +3155,11 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 			// WIN also in case ALT is down, which might cause the use of SHIFT as the disguise key
 			// to trigger the language switch.
 			if (ctrl_nor_shift_nor_alt_down && aDisguiseUpWinAlt // Nor will they be pushed down later below, otherwise defer_win_release would have been true and we couldn't get to this point.
-				&& sSendMode != SM_PLAY) // SendPlay can't display Start Menu, so disguise not needed (also, disguise might mess up some games).
-				KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo); // Disguise key release to suppress Start Menu.
-				// The above event is safe because if we're here, it means VK_CONTROL will not be
-				// pressed down further below.  In other words, we're not defeating the job
-				// of this function by sending these disguise keystrokes.
+				&& sSendMode != SM_PLAY)						 // SendPlay can't display Start Menu, so disguise not needed (also, disguise might mess up some games).
+				KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo);		 // Disguise key release to suppress Start Menu.
+																 // The above event is safe because if we're here, it means VK_CONTROL will not be
+																 // pressed down further below.  In other words, we're not defeating the job
+																 // of this function by sending these disguise keystrokes.
 			KeyEvent(KEYUP, VK_LWIN, 0, NULL, false, aExtraInfo);
 		}
 		// else release it only after the normal operation of the function pushes down the disguise keys.
@@ -3315,12 +3296,12 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// being down before for certain early operations.
 
 	// ** CONTROL
-	if (   (aModifiersLRnow & MOD_LCONTROL) && !(aModifiersLRnew & MOD_LCONTROL) // Release LControl.
-		// v1.0.41.01: The following line was added to fix the fact that callers do not want LControl
-		// released when the new modifier state includes AltGr.  This solves a hotkey such as the following and
-		// probably several other circumstances:
-		// <^>!a::send \  ; Backslash is solved by this fix; it's manifest via AltGr+Dash on German layout.
-		&& !((aModifiersLRnew & MOD_RALT) && sTargetLayoutHasAltGr == CONDITION_TRUE)   )
+	if ((aModifiersLRnow & MOD_LCONTROL) && !(aModifiersLRnew & MOD_LCONTROL) // Release LControl.
+																			  // v1.0.41.01: The following line was added to fix the fact that callers do not want LControl
+																			  // released when the new modifier state includes AltGr.  This solves a hotkey such as the following and
+																			  // probably several other circumstances:
+																			  // <^>!a::send \  ; Backslash is solved by this fix; it's manifest via AltGr+Dash on German layout.
+		&& !((aModifiersLRnew & MOD_RALT) && sTargetLayoutHasAltGr == CONDITION_TRUE))
 		KeyEvent(KEYUP, VK_LCONTROL, 0, NULL, false, aExtraInfo);
 	else if (!(aModifiersLRnow & MOD_LCONTROL) && (aModifiersLRnew & MOD_LCONTROL)) // Press down LControl.
 		KeyEvent(KEYDOWN, VK_LCONTROL, 0, NULL, false, aExtraInfo);
@@ -3328,7 +3309,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		KeyEvent(KEYUP, VK_RCONTROL, 0, NULL, false, aExtraInfo);
 	else if (!(aModifiersLRnow & MOD_RCONTROL) && (aModifiersLRnew & MOD_RCONTROL)) // Press down RControl.
 		KeyEvent(KEYDOWN, VK_RCONTROL, 0, NULL, false, aExtraInfo);
-	
+
 	// ** SHIFT (PART 2 OF 2)
 	// Must follow CTRL and ALT because a release of SHIFT while ALT/CTRL is down-but-soon-to-be-up
 	// would switch languages via the OS hotkey.  It's okay if defer_alt_release==true because in that case,
@@ -3394,7 +3375,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		// cases where modifiers need to be left alone for a short time in order for the keystrokes
 		// that follow to be be modified by the intended set of modifiers).
 		DoKeyDelay(press_duration); // It knows not to do the delay for SM_INPUT.
-	else // Since no key-delay was done, check if a a delay is needed for any other reason.
+	else							// Since no key-delay was done, check if a a delay is needed for any other reason.
 	{
 		// IMPORTANT UPDATE for v1.0.39: Now that the hooks are in a separate thread from the part
 		// of the program that sends keystrokes for the script, you might think synchronization of
@@ -3427,8 +3408,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 
 	// Commented out because a return value is no longer needed by callers (since we do the key-delay here,
 	// if appropriate).
-	//return aModifiersLRnow ^ aModifiersLRnew; // Calculate the set of modifiers that changed (currently excludes AltGr's change of LControl's state).
-
+	// return aModifiersLRnow ^ aModifiersLRnew; // Calculate the set of modifiers that changed (currently excludes AltGr's change of LControl's state).
 
 	// NOTES about "release_shift_before_alt_ctrl":
 	// If going down on alt or control (but not both, though it might not matter), and shift is to be released:
@@ -3458,10 +3438,10 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// NOTES: More details about disguising ALT and WIN:
 	// Registered Alt hotkeys don't quite work if the Alt key is released prior to the suffix.
 	// Key history for Alt-B hotkey released this way, which undesirably activates the menu bar:
-	// A4  038	 	d	0.03	Alt            	
-	// 42  030	 	d	0.03	B              	
-	// A4  038	 	u	0.24	Alt            	
-	// 42  030	 	u	0.19	B              	
+	// A4  038	 	d	0.03	Alt
+	// 42  030	 	d	0.03	B
+	// A4  038	 	u	0.24	Alt
+	// 42  030	 	u	0.19	B
 	// Testing shows that the above does not happen for a normal (non-hotkey) alt keystroke such as Alt-8,
 	// so the above behavior is probably caused by the fact that B-down is suppressed by the OS's hotkey
 	// routine, but not B-up.
@@ -3484,8 +3464,6 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// alt-down ctrl-down ctrl-up alt-up
 	// (also seems true for all other permutations of Ctrl/Alt)
 }
-
-
 
 modLR_type GetModifierLRState(bool aExplicitlyGet)
 // Try to report a more reliable state of the modifier keys than GetKeyboardState alone could.
@@ -3511,15 +3489,23 @@ modLR_type GetModifierLRState(bool aExplicitlyGet)
 	// cases where GetKeyboardState() is incorrect (at least under WinXP) when GetKeyState(),
 	// in its place, yields the correct info.  Very strange.
 
-	modLR_type modifiersLR = 0;  // Allows all to default to up/off to simplify the below.
-	if (IsKeyDownAsync(VK_LSHIFT))   modifiersLR |= MOD_LSHIFT;
-	if (IsKeyDownAsync(VK_RSHIFT))   modifiersLR |= MOD_RSHIFT;
-	if (IsKeyDownAsync(VK_LCONTROL)) modifiersLR |= MOD_LCONTROL;
-	if (IsKeyDownAsync(VK_RCONTROL)) modifiersLR |= MOD_RCONTROL;
-	if (IsKeyDownAsync(VK_LMENU))    modifiersLR |= MOD_LALT;
-	if (IsKeyDownAsync(VK_RMENU))    modifiersLR |= MOD_RALT;
-	if (IsKeyDownAsync(VK_LWIN))     modifiersLR |= MOD_LWIN;
-	if (IsKeyDownAsync(VK_RWIN))     modifiersLR |= MOD_RWIN;
+	modLR_type modifiersLR = 0; // Allows all to default to up/off to simplify the below.
+	if (IsKeyDownAsync(VK_LSHIFT))
+		modifiersLR |= MOD_LSHIFT;
+	if (IsKeyDownAsync(VK_RSHIFT))
+		modifiersLR |= MOD_RSHIFT;
+	if (IsKeyDownAsync(VK_LCONTROL))
+		modifiersLR |= MOD_LCONTROL;
+	if (IsKeyDownAsync(VK_RCONTROL))
+		modifiersLR |= MOD_RCONTROL;
+	if (IsKeyDownAsync(VK_LMENU))
+		modifiersLR |= MOD_LALT;
+	if (IsKeyDownAsync(VK_RMENU))
+		modifiersLR |= MOD_RALT;
+	if (IsKeyDownAsync(VK_LWIN))
+		modifiersLR |= MOD_LWIN;
+	if (IsKeyDownAsync(VK_RWIN))
+		modifiersLR |= MOD_RWIN;
 
 	// Thread-safe: The following section isn't thread-safe because either the hook thread
 	// or the main thread can be calling it.  However, given that anything dealing with
@@ -3614,10 +3600,8 @@ modLR_type GetModifierLRState(bool aExplicitlyGet)
 	// There are still a few cases when they don't agree, so return the bitwise-and of both
 	// if the keyboard hook is active.  Bitwise and is used because generally it's safer
 	// to assume a modifier key is up, when in doubt (e.g. to avoid firing unwanted hotkeys):
-//	return g_KeybdHook ? (g_modifiersLR_logical & g_modifiersLR_get) : g_modifiersLR_get;
+	//	return g_KeybdHook ? (g_modifiersLR_logical & g_modifiersLR_get) : g_modifiersLR_get;
 }
-
-
 
 void AdjustKeyState(BYTE aKeyState[], modLR_type aModifiersLR)
 // Caller has ensured that aKeyState is a 256-BYTE array of key states, in the same format used
@@ -3637,8 +3621,6 @@ void AdjustKeyState(BYTE aKeyState[], modLR_type aModifiersLR)
 	aKeyState[VK_MENU] = (aKeyState[VK_LMENU] || aKeyState[VK_RMENU]) ? STATE_DOWN : 0;
 }
 
-
-
 modLR_type KeyToModifiersLR(vk_type aVK, sc_type aSC, bool *pIsNeutral)
 // Convert the given virtual key / scan code to its equivalent bitwise modLR value.
 // Callers rely upon the fact that we convert a neutral key such as VK_SHIFT into MOD_LSHIFT,
@@ -3649,107 +3631,131 @@ modLR_type KeyToModifiersLR(vk_type aVK, sc_type aSC, bool *pIsNeutral)
 {
 	bool placeholder;
 	bool &is_neutral = pIsNeutral ? *pIsNeutral : placeholder; // Simplifies other things below.
-	is_neutral = false; // Set default for output parameter for caller.
+	is_neutral = false;										   // Set default for output parameter for caller.
 
 	if (!(aVK || aSC))
 		return 0;
 
 	if (aVK) // Have vk take precedence over any non-zero sc.
-		switch(aVK)
+		switch (aVK)
 		{
 		case VK_SHIFT:
 			if (aSC == SC_RSHIFT)
 				return MOD_RSHIFT;
-			//else aSC is omitted (0) or SC_LSHIFT.  Either way, most callers would probably want that considered "neutral".
+			// else aSC is omitted (0) or SC_LSHIFT.  Either way, most callers would probably want that considered "neutral".
 			is_neutral = true;
 			return MOD_LSHIFT;
-		case VK_LSHIFT: return MOD_LSHIFT;
-		case VK_RSHIFT:	return MOD_RSHIFT;
+		case VK_LSHIFT:
+			return MOD_LSHIFT;
+		case VK_RSHIFT:
+			return MOD_RSHIFT;
 
 		case VK_CONTROL:
 			if (aSC == SC_RCONTROL)
 				return MOD_RCONTROL;
-			//else aSC is omitted (0) or SC_LCONTROL.  Either way, most callers would probably want that considered "neutral".
+			// else aSC is omitted (0) or SC_LCONTROL.  Either way, most callers would probably want that considered "neutral".
 			is_neutral = true;
 			return MOD_LCONTROL;
-		case VK_LCONTROL: return MOD_LCONTROL;
-		case VK_RCONTROL: return MOD_RCONTROL;
+		case VK_LCONTROL:
+			return MOD_LCONTROL;
+		case VK_RCONTROL:
+			return MOD_RCONTROL;
 
 		case VK_MENU:
 			if (aSC == SC_RALT)
 				return MOD_RALT;
-			//else aSC is omitted (0) or SC_LALT.  Either way, most callers would probably want that considered "neutral".
+			// else aSC is omitted (0) or SC_LALT.  Either way, most callers would probably want that considered "neutral".
 			is_neutral = true;
 			return MOD_LALT;
-		case VK_LMENU: return MOD_LALT;
-		case VK_RMENU: return MOD_RALT;
+		case VK_LMENU:
+			return MOD_LALT;
+		case VK_RMENU:
+			return MOD_RALT;
 
-		case VK_LWIN: return MOD_LWIN;
-		case VK_RWIN: return MOD_RWIN;
+		case VK_LWIN:
+			return MOD_LWIN;
+		case VK_RWIN:
+			return MOD_RWIN;
 
 		default:
 			return 0;
 		}
 
 	// If above didn't return, rely on the scan code instead, which is now known to be non-zero.
-	switch(aSC)
+	switch (aSC)
 	{
-	case SC_LSHIFT: return MOD_LSHIFT;
-	case SC_RSHIFT:	return MOD_RSHIFT;
-	case SC_LCONTROL: return MOD_LCONTROL;
-	case SC_RCONTROL: return MOD_RCONTROL;
-	case SC_LALT: return MOD_LALT;
-	case SC_RALT: return MOD_RALT;
-	case SC_LWIN: return MOD_LWIN;
-	case SC_RWIN: return MOD_RWIN;
+	case SC_LSHIFT:
+		return MOD_LSHIFT;
+	case SC_RSHIFT:
+		return MOD_RSHIFT;
+	case SC_LCONTROL:
+		return MOD_LCONTROL;
+	case SC_RCONTROL:
+		return MOD_RCONTROL;
+	case SC_LALT:
+		return MOD_LALT;
+	case SC_RALT:
+		return MOD_RALT;
+	case SC_LWIN:
+		return MOD_LWIN;
+	case SC_RWIN:
+		return MOD_RWIN;
 	}
 	return 0;
 }
-
-
 
 modLR_type ConvertModifiers(mod_type aModifiers)
 // Convert the input param to a modifiersLR value and return it.
 {
 	modLR_type modifiersLR = 0;
-	if (aModifiers & MOD_WIN) modifiersLR |= (MOD_LWIN | MOD_RWIN);
-	if (aModifiers & MOD_ALT) modifiersLR |= (MOD_LALT | MOD_RALT);
-	if (aModifiers & MOD_CONTROL) modifiersLR |= (MOD_LCONTROL | MOD_RCONTROL);
-	if (aModifiers & MOD_SHIFT) modifiersLR |= (MOD_LSHIFT | MOD_RSHIFT);
+	if (aModifiers & MOD_WIN)
+		modifiersLR |= (MOD_LWIN | MOD_RWIN);
+	if (aModifiers & MOD_ALT)
+		modifiersLR |= (MOD_LALT | MOD_RALT);
+	if (aModifiers & MOD_CONTROL)
+		modifiersLR |= (MOD_LCONTROL | MOD_RCONTROL);
+	if (aModifiers & MOD_SHIFT)
+		modifiersLR |= (MOD_LSHIFT | MOD_RSHIFT);
 	return modifiersLR;
 }
-
-
 
 mod_type ConvertModifiersLR(modLR_type aModifiersLR)
 // Convert the input param to a normal modifiers value and return it.
 {
 	mod_type modifiers = 0;
-	if (aModifiersLR & (MOD_LWIN | MOD_RWIN)) modifiers |= MOD_WIN;
-	if (aModifiersLR & (MOD_LALT | MOD_RALT)) modifiers |= MOD_ALT;
-	if (aModifiersLR & (MOD_LSHIFT | MOD_RSHIFT)) modifiers |= MOD_SHIFT;
-	if (aModifiersLR & (MOD_LCONTROL | MOD_RCONTROL)) modifiers |= MOD_CONTROL;
+	if (aModifiersLR & (MOD_LWIN | MOD_RWIN))
+		modifiers |= MOD_WIN;
+	if (aModifiersLR & (MOD_LALT | MOD_RALT))
+		modifiers |= MOD_ALT;
+	if (aModifiersLR & (MOD_LSHIFT | MOD_RSHIFT))
+		modifiers |= MOD_SHIFT;
+	if (aModifiersLR & (MOD_LCONTROL | MOD_RCONTROL))
+		modifiers |= MOD_CONTROL;
 	return modifiers;
 }
-
-
 
 LPTSTR ModifiersLRToText(modLR_type aModifiersLR, LPTSTR aBuf)
 // Caller has ensured that aBuf is not NULL.
 {
 	*aBuf = '\0';
-	if (aModifiersLR & MOD_LWIN) _tcscat(aBuf, _T("LWin "));
-	if (aModifiersLR & MOD_RWIN) _tcscat(aBuf, _T("RWin "));
-	if (aModifiersLR & MOD_LSHIFT) _tcscat(aBuf, _T("LShift "));
-	if (aModifiersLR & MOD_RSHIFT) _tcscat(aBuf, _T("RShift "));
-	if (aModifiersLR & MOD_LCONTROL) _tcscat(aBuf, _T("LCtrl "));
-	if (aModifiersLR & MOD_RCONTROL) _tcscat(aBuf, _T("RCtrl "));
-	if (aModifiersLR & MOD_LALT) _tcscat(aBuf, _T("LAlt "));
-	if (aModifiersLR & MOD_RALT) _tcscat(aBuf, _T("RAlt "));
+	if (aModifiersLR & MOD_LWIN)
+		_tcscat(aBuf, _T("LWin "));
+	if (aModifiersLR & MOD_RWIN)
+		_tcscat(aBuf, _T("RWin "));
+	if (aModifiersLR & MOD_LSHIFT)
+		_tcscat(aBuf, _T("LShift "));
+	if (aModifiersLR & MOD_RSHIFT)
+		_tcscat(aBuf, _T("RShift "));
+	if (aModifiersLR & MOD_LCONTROL)
+		_tcscat(aBuf, _T("LCtrl "));
+	if (aModifiersLR & MOD_RCONTROL)
+		_tcscat(aBuf, _T("RCtrl "));
+	if (aModifiersLR & MOD_LALT)
+		_tcscat(aBuf, _T("LAlt "));
+	if (aModifiersLR & MOD_RALT)
+		_tcscat(aBuf, _T("RAlt "));
 	return aBuf;
 }
-
-
 
 DWORD GetFocusedCtrlThread(HWND *apControl, HWND aWindow)
 {
@@ -3780,23 +3786,17 @@ DWORD GetFocusedCtrlThread(HWND *apControl, HWND aWindow)
 	return thread_id;
 }
 
-
-
 HKL GetFocusedKeybdLayout(HWND aWindow)
 {
 	return GetKeyboardLayout(GetFocusedCtrlThread(NULL, aWindow));
 }
 
-
-
 bool ActiveWindowLayoutHasAltGr()
 // Thread-safety: See comments in LayoutHasAltGr() below.
 {
-	Get_active_window_keybd_layout // Defines the variable active_window_keybd_layout for use below.
-	return LayoutHasAltGr(active_window_keybd_layout) == CONDITION_TRUE; // i.e caller wants both CONDITION_FALSE and LAYOUT_UNDETERMINED to be considered non-AltGr.
+	Get_active_window_keybd_layout											 // Defines the variable active_window_keybd_layout for use below.
+		return LayoutHasAltGr(active_window_keybd_layout) == CONDITION_TRUE; // i.e caller wants both CONDITION_FALSE and LAYOUT_UNDETERMINED to be considered non-AltGr.
 }
-
-
 
 HMODULE LoadKeyboardLayoutModule(HKL aLayout)
 // Loads a keyboard layout DLL and returns its handle.
@@ -3810,7 +3810,7 @@ HMODULE LoadKeyboardLayoutModule(HKL aLayout)
 	// is already the current layout).
 	if (HKL old_layout = ActivateKeyboardLayout(aLayout, 0))
 	{
-		#define KEYBOARD_LAYOUTS_REG_KEY _T("SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts\\")
+#define KEYBOARD_LAYOUTS_REG_KEY _T("SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts\\")
 		const size_t prefix_length = _countof(KEYBOARD_LAYOUTS_REG_KEY) - 1;
 		TCHAR keyname[prefix_length + KL_NAMELENGTH];
 		_tcscpy(keyname, KEYBOARD_LAYOUTS_REG_KEY);
@@ -3828,8 +3828,6 @@ HMODULE LoadKeyboardLayoutModule(HKL aLayout)
 	return hmod;
 }
 
-
-
 ResultType LayoutHasAltGrDirect(HKL aLayout)
 // Loads and reads the keyboard layout DLL to determine if it has AltGr.
 // Activates the layout as a side-effect, but reverts it if !aSideEffectsOK.
@@ -3842,7 +3840,8 @@ ResultType LayoutHasAltGrDirect(HKL aLayout)
 	typedef UINT KLP32;
 
 	// Struct used on 64-bit systems (by both 32-bit and 64-bit programs):
-	struct KBDTABLES64 {
+	struct KBDTABLES64
+	{
 		KLP64 pCharModifiers;
 		KLP64 pVkToWcharTable;
 		KLP64 pDeadKey;
@@ -3850,7 +3849,7 @@ ResultType LayoutHasAltGrDirect(HKL aLayout)
 		KLP64 pKeyNamesExt;
 		KLP64 pKeyNamesDead;
 		KLP64 pusVSCtoVK;
-		BYTE  bMaxVSCtoVK;
+		BYTE bMaxVSCtoVK;
 		KLP64 pVSCtoVK_E0;
 		KLP64 pVSCtoVK_E1;
 		// This is the one we want:
@@ -3859,7 +3858,8 @@ ResultType LayoutHasAltGrDirect(HKL aLayout)
 	};
 
 	// Struct used on 32-bit systems:
-	struct KBDTABLES32 {
+	struct KBDTABLES32
+	{
 		KLP32 pCharModifiers;
 		KLP32 pVkToWcharTable;
 		KLP32 pDeadKey;
@@ -3867,16 +3867,16 @@ ResultType LayoutHasAltGrDirect(HKL aLayout)
 		KLP32 pKeyNamesExt;
 		KLP32 pKeyNamesDead;
 		KLP32 pusVSCtoVK;
-		BYTE  bMaxVSCtoVK;
+		BYTE bMaxVSCtoVK;
 		KLP32 pVSCtoVK_E0;
 		KLP32 pVSCtoVK_E1;
 		// This is the one we want:
 		DWORD fLocaleFlags;
 		// Struct definition truncated.
 	};
-	
-	#define KLLF_ALTGR 0x0001 // Also defined in kbd.h.
-	typedef PVOID (* KbdLayerDescriptorType)();
+
+#define KLLF_ALTGR 0x0001 // Also defined in kbd.h.
+	typedef PVOID (*KbdLayerDescriptorType)();
 
 	ResultType result = FAIL;
 
@@ -3893,8 +3893,6 @@ ResultType LayoutHasAltGrDirect(HKL aLayout)
 	}
 	return result;
 }
-
-
 
 ResultType LayoutHasAltGr(HKL aLayout)
 // Thread-safety: While not thoroughly thread-safe, due to the extreme simplicity of the cache array, even if
@@ -3914,7 +3912,7 @@ ResultType LayoutHasAltGr(HKL aLayout)
 	// there's room in the array for a new cache entry.  In the very unlikely event that there isn't room,
 	// overwrite an arbitrary item in the array.  An LRU/MRU algorithm (timestamp) isn't used because running out
 	// of slots seems too unlikely, and the consequences of running out are merely a slight degradation in performance.
-	CachedLayoutType &cl = sCachedLayout[(i < MAX_CACHED_LAYOUTS) ? i : MAX_CACHED_LAYOUTS-1];
+	CachedLayoutType &cl = sCachedLayout[(i < MAX_CACHED_LAYOUTS) ? i : MAX_CACHED_LAYOUTS - 1];
 
 	// The old approach here was to call VkKeyScanEx for each character code and find any that require
 	// AltGr.  However, that was unacceptably slow for the wider character range of the Unicode build.
@@ -3930,8 +3928,6 @@ ResultType LayoutHasAltGr(HKL aLayout)
 	cl.hkl = aLayout; // This is done here (immediately after has_altgr is set) rather than earlier to minimize the consequences of not being fully thread-safe.
 	return cl.has_altgr;
 }
-
-
 
 LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback)
 // aBufSize is an int so that any negative values passed in from caller are not lost.
@@ -3952,8 +3948,6 @@ LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback)
 		*aBuf = '\0';
 	return aBuf;
 }
-
-
 
 LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback)
 // aBufSize is an int so that any negative values passed in from caller are not lost.
@@ -3978,7 +3972,6 @@ LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback)
 	return aBuf;
 }
 
-
 TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout)
 // Given a VK code, returns the character that an unmodified keypress would produce
 // on the given keyboard layout.  Defaults to the script's own layout if omitted.
@@ -3987,13 +3980,13 @@ TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout)
 {
 	if (!aKeybdLayout)
 		aKeybdLayout = GetKeyboardLayout(0);
-	
+
 	// MapVirtualKeyEx() always produces 'A'-'Z' for those keys regardless of keyboard layout,
 	// but for any other keys it produces the correct results, so we'll use it:
 	if (aVK > 'Z' || aVK < 'A')
 		return (TCHAR)MapVirtualKeyEx(aVK, MAPVK_VK_TO_CHAR, aKeybdLayout);
 
-	// For any other keys, 
+	// For any other keys,
 	TCHAR ch[3], ch_not_used[2];
 	BYTE key_state[256];
 	ZeroMemory(key_state, sizeof(key_state));
@@ -4027,17 +4020,16 @@ TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout)
 			AdjustKeyState(key_state, modLR);
 			ToUnicodeOrAsciiEx(dead_vk, 0, key_state, ch_not_used, 0, aKeybdLayout);
 		}
-		//else: can't do it.
+		// else: can't do it.
 	}
 	// ch[0] is set even for n < 0, but might not be for n == 0.
 	return n ? ch[0] : 0;
 }
 
-
-
 sc_type TextToSC(LPCTSTR aText, bool *aSpecifiedByNumber)
 {
-	if (!*aText) return 0;
+	if (!*aText)
+		return 0;
 	for (int i = 0; i < g_key_to_sc_count; ++i)
 		if (!_tcsicmp(g_key_to_sc[i].key_name, aText))
 			return g_key_to_sc[i].sc;
@@ -4045,7 +4037,7 @@ sc_type TextToSC(LPCTSTR aText, bool *aSpecifiedByNumber)
 	if (ctoupper(*aText) == 'S' && ctoupper(*(aText + 1)) == 'C')
 	{
 		LPTSTR endptr;
-		sc_type sc = (sc_type)_tcstol(aText + 2, &endptr, 16);  // Convert from hex.
+		sc_type sc = (sc_type)_tcstol(aText + 2, &endptr, 16); // Convert from hex.
 		if (*endptr)
 			return 0; // Fixed for v1.1.27: Disallow any invalid suffix so that hotkeys like a::scb() are not misinterpreted as remappings.
 		if (aSpecifiedByNumber)
@@ -4055,29 +4047,27 @@ sc_type TextToSC(LPCTSTR aText, bool *aSpecifiedByNumber)
 	return 0; // Indicate "not found".
 }
 
-
-
-vk_type TextToVK(LPCTSTR aText, modLR_type *pModifiersLR, bool aExcludeThoseHandledByScanCode, bool aAllowExplicitVK
-	, HKL aKeybdLayout)
+vk_type TextToVK(LPCTSTR aText, modLR_type *pModifiersLR, bool aExcludeThoseHandledByScanCode, bool aAllowExplicitVK, HKL aKeybdLayout)
 // If pModifiersLR is non-NULL, place the modifiers that are needed to realize the key in there.
 // e.g. M is really +m (shift-m), # is really shift-3.
 // HOWEVER, this function does not completely overwrite the contents of pModifiersLR; instead, it just
 // adds the required modifiers into whatever is already there.
 {
-	if (!*aText) return 0;
+	if (!*aText)
+		return 0;
 
 	// Don't trim() aText or modify it because that will mess up the caller who expects it to be unchanged.
 	// Instead, for now, just check it as-is.  The only extra whitespace that should exist, due to trimming
 	// of text during load, is that on either side of the COMPOSITE_DELIMITER (e.g. " then ").
 
-	if (!aText[1]) // _tcslen(aText) == 1
+	if (!aText[1])														 // _tcslen(aText) == 1
 		return CharToVKAndModifiers(*aText, pModifiersLR, aKeybdLayout); // Making this a function simplifies things because it can do early return, etc.
 
 	if (aAllowExplicitVK && ctoupper(aText[0]) == 'V' && ctoupper(aText[1]) == 'K')
 	{
 		LPTSTR endptr;
-		vk_type vk = (vk_type)_tcstol(aText + 2, &endptr, 16);  // Convert from hex.
-		return *endptr ? 0 : vk; // Fixed for v1.1.27: Disallow any invalid suffix so that hotkeys like a::vkb() are not misinterpreted as remappings.
+		vk_type vk = (vk_type)_tcstol(aText + 2, &endptr, 16); // Convert from hex.
+		return *endptr ? 0 : vk;							   // Fixed for v1.1.27: Disallow any invalid suffix so that hotkeys like a::vkb() are not misinterpreted as remappings.
 	}
 
 	for (int i = 0; i < g_key_to_vk_count; ++i)
@@ -4092,8 +4082,6 @@ vk_type TextToVK(LPCTSTR aText, modLR_type *pModifiersLR, bool aExcludeThoseHand
 	sc_type sc = TextToSC(aText);
 	return sc ? sc_to_vk(sc) : 0;
 }
-
-
 
 vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout, bool aEnableAZFallback)
 // If non-NULL, pModifiersLR contains the initial set of modifiers provided by the caller, to which
@@ -4110,7 +4098,7 @@ vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLa
 	char keyscan_modifiers = HIBYTE(mod_plus_vk);
 	if (keyscan_modifiers == -1 && vk == (UCHAR)-1) // No translation could be made.
 	{
-		if (  !(aEnableAZFallback && cisalpha(aChar))  )
+		if (!(aEnableAZFallback && cisalpha(aChar)))
 			return 0;
 		// v1.1.27.00: Use the A-Z fallback; assume the user means vk41-vk5A, since these letters
 		// are commonly used to describe keyboard shortcuts even when these vk codes are actually
@@ -4149,21 +4137,19 @@ vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLa
 		{
 			// v1.0.40: If caller-supplied modifiers already include the right-side key, no need to
 			// add the left-side key (avoids unnecessary keystrokes).
-			if (   (keyscan_modifiers & 0x02) && !(*pModifiersLR & (MOD_LCONTROL|MOD_RCONTROL))   )
+			if ((keyscan_modifiers & 0x02) && !(*pModifiersLR & (MOD_LCONTROL | MOD_RCONTROL)))
 				*pModifiersLR |= MOD_LCONTROL; // Must not be done if requires_altgr==true, see above.
-			if (   (keyscan_modifiers & 0x04) && !(*pModifiersLR & (MOD_LALT|MOD_RALT))   )
+			if ((keyscan_modifiers & 0x04) && !(*pModifiersLR & (MOD_LALT | MOD_RALT)))
 				*pModifiersLR |= MOD_LALT;
 		}
 		// v1.0.36.06: Done unconditionally because presence of AltGr should not preclude the presence of Shift.
 		// v1.0.40: If caller-supplied modifiers already contains MOD_RSHIFT, no need to add LSHIFT (avoids
 		// unnecessary keystrokes).
-		if (   (keyscan_modifiers & 0x01) && !(*pModifiersLR & (MOD_LSHIFT|MOD_RSHIFT))   )
+		if ((keyscan_modifiers & 0x01) && !(*pModifiersLR & (MOD_LSHIFT | MOD_RSHIFT)))
 			*pModifiersLR |= MOD_LSHIFT;
 	}
 	return vk;
 }
-
-
 
 bool TextToVKandSC(LPCTSTR aText, vk_type &aVK, sc_type &aSC, modLR_type *pModifiersLR, HKL aKeybdLayout)
 {
@@ -4197,10 +4183,7 @@ bool TextToVKandSC(LPCTSTR aText, vk_type &aVK, sc_type &aSC, modLR_type *pModif
 	return false;
 }
 
-
-
-vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventType, modLR_type &aModifiersLR
-	, bool aUpdatePersistent)
+vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventType, modLR_type &aModifiersLR, bool aUpdatePersistent)
 // Returns vk for key-down, negative vk for key-up, or zero if no translation.
 // We also update whatever's in *pModifiers and *pModifiersLR to reflect the type of key-action
 // specified in <aText>.  This makes it so that {altdown}{esc}{altup} behaves the same as !{esc}.
@@ -4211,7 +4194,7 @@ vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTyp
 	{
 		if (aUpdatePersistent)
 			if (!(aModifiersLR & (MOD_LALT | MOD_RALT))) // i.e. do nothing if either left or right is already present.
-				aModifiersLR |= MOD_LALT; // If neither is down, use the left one because it's more compatible.
+				aModifiersLR |= MOD_LALT;				 // If neither is down, use the left one because it's more compatible.
 		aEventType = KEYDOWN;
 		return VK_MENU;
 	}
@@ -4229,7 +4212,7 @@ vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTyp
 	{
 		if (aUpdatePersistent)
 			if (!(aModifiersLR & (MOD_LSHIFT | MOD_RSHIFT))) // i.e. do nothing if either left or right is already present.
-				aModifiersLR |= MOD_LSHIFT; // If neither is down, use the left one because it's more compatible.
+				aModifiersLR |= MOD_LSHIFT;					 // If neither is down, use the left one because it's more compatible.
 		aEventType = KEYDOWN;
 		return VK_SHIFT;
 	}
@@ -4244,7 +4227,7 @@ vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTyp
 	{
 		if (aUpdatePersistent)
 			if (!(aModifiersLR & (MOD_LCONTROL | MOD_RCONTROL))) // i.e. do nothing if either left or right is already present.
-				aModifiersLR |= MOD_LCONTROL; // If neither is down, use the left one because it's more compatible.
+				aModifiersLR |= MOD_LCONTROL;					 // If neither is down, use the left one because it's more compatible.
 		aEventType = KEYDOWN;
 		return VK_CONTROL;
 	}
@@ -4287,8 +4270,6 @@ vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTyp
 	return 0;
 }
 
-
-
 LPTSTR GetKeyName(vk_type aVK, sc_type aSC, LPTSTR aBuf, int aBufSize, LPTSTR aDefault)
 // aBufSize is an int so that any negative values passed in from caller are not lost.
 // Caller has ensured that aBuf isn't NULL.
@@ -4302,9 +4283,8 @@ LPTSTR GetKeyName(vk_type aVK, sc_type aSC, LPTSTR aBuf, int aBufSize, LPTSTR aD
 
 	if (!aVK)
 		aVK = sc_to_vk(aSC);
-	else
-		if (!aSC && (aVK == VK_RETURN || !(aSC = vk_to_sc(aVK, true)))) // Prefer the non-Numpad name.
-			aSC = vk_to_sc(aVK);
+	else if (!aSC && (aVK == VK_RETURN || !(aSC = vk_to_sc(aVK, true)))) // Prefer the non-Numpad name.
+		aSC = vk_to_sc(aVK);
 
 	// Check SC first to properly differentiate between Home/NumpadHome, End/NumpadEnd, etc.
 	// v1.0.43: WheelDown/Up store the notch/turn count in SC, so don't consider that to be a valid SC.
@@ -4319,8 +4299,6 @@ LPTSTR GetKeyName(vk_type aVK, sc_type aSC, LPTSTR aBuf, int aBufSize, LPTSTR aD
 	// Since this key is unrecognized, return the caller-supplied default value.
 	return aDefault;
 }
-
-
 
 sc_type vk_to_sc(vk_type aVK, bool aReturnSecondary)
 // If caller passes true for aReturnSecondary, the "extended" scan code will be returned for
@@ -4342,22 +4320,28 @@ sc_type vk_to_sc(vk_type aVK, bool aReturnSecondary)
 	{
 	// MapVirtualKey() returns 0xE11D, but we want the code normally received by the
 	// hook (sc045).  See sc_to_vk() for more comments.
-	case VK_PAUSE:    sc = SC_PAUSE; break;
+	case VK_PAUSE:
+		sc = SC_PAUSE;
+		break;
 
 	// PrintScreen: MapVirtualKey() returns 0x54, which is SysReq (produced by pressing
 	// Alt+PrintScreen, but still maps to VK_SNAPSHOT).  Use sc137 for consistency with
 	// what the hook reports for the naked keypress (and therefore what a hotkey is
 	// likely to need).
-	case VK_SNAPSHOT: sc = SC_PRINTSCREEN; break;
+	case VK_SNAPSHOT:
+		sc = SC_PRINTSCREEN;
+		break;
 
 	// See comments in sc_to_vk().
-	case VK_NUMLOCK:  sc = SC_NUMLOCK; break;
+	case VK_NUMLOCK:
+		sc = SC_NUMLOCK;
+		break;
 	}
 
-	if (sc) // Above found a match.
+	if (sc)								  // Above found a match.
 		return aReturnSecondary ? 0 : sc; // Callers rely on zero being returned for VKs that don't have secondary SCs.
 
-	if (   !(sc = MapVirtualKey(aVK, MAPVK_VK_TO_VSC_EX))   )
+	if (!(sc = MapVirtualKey(aVK, MAPVK_VK_TO_VSC_EX)))
 		return 0; // Indicate "no mapping".
 
 	if (sc & 0xE000) // Prefix byte E0 or E1 (but E1 should only be possible for Pause/Break, which was already handled above).
@@ -4406,8 +4390,6 @@ sc_type vk_to_sc(vk_type aVK, bool aReturnSecondary)
 	// Since above didn't return, if aReturnSecondary==true, return 0 to indicate "no secondary SC for this VK".
 	return aReturnSecondary ? 0 : sc; // Callers rely on zero being returned for VKs that don't have secondary SCs.
 }
-
-
 
 vk_type sc_to_vk(sc_type aSC)
 {
@@ -4464,8 +4446,6 @@ vk_type sc_to_vk(sc_type aSC)
 	}
 	return MapVirtualKey(aSC, MAPVK_VSC_TO_VK_EX);
 }
-
-
 
 #pragma region Top-level Functions
 
@@ -4525,8 +4505,6 @@ bif_impl FResult MouseMove(int aX, int aY, optl<int> aSpeed, optl<StrArg> aRelat
 }
 
 #pragma endregion
-
-
 
 #pragma region BlockInput
 

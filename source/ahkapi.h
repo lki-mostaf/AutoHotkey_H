@@ -6,30 +6,30 @@
 
 #ifndef _T
 #ifdef _UNICODE
-#define _T(x)	L ## x
+#define _T(x) L##x
 #else
-#define _T(x)	x
+#define _T(x) x
 #endif
 #endif
 
-#define IT_GET				0
-#define IT_SET				1
-#define IT_CALL				2
-#define IT_BITMASK			3
+#define IT_GET 0
+#define IT_SET 1
+#define IT_CALL 2
+#define IT_BITMASK 3
 
-#define INVOKE_TYPE			(aFlags & IT_BITMASK)
-#define IS_INVOKE_SET		(aFlags & IT_SET)
-#define IS_INVOKE_GET		(INVOKE_TYPE == IT_GET)
-#define IS_INVOKE_CALL		(aFlags & IT_CALL)
+#define INVOKE_TYPE (aFlags & IT_BITMASK)
+#define IS_INVOKE_SET (aFlags & IT_SET)
+#define IS_INVOKE_GET (INVOKE_TYPE == IT_GET)
+#define IS_INVOKE_CALL (aFlags & IT_CALL)
 
-#define INVOKE_NOT_HANDLED	CONDITION_FALSE
+#define INVOKE_NOT_HANDLED CONDITION_FALSE
 
 #define MAX_NUMBER_LENGTH 255
 #define MAX_NUMBER_SIZE (MAX_NUMBER_LENGTH + 1)
 #define MAX_INTEGER_LENGTH 20
 #define MAX_INTEGER_SIZE (MAX_INTEGER_LENGTH + 1)
 
-#define _f_callee_id			(aResultToken.func->mFID)
+#define _f_callee_id (aResultToken.func->mFID)
 
 #ifdef _WIN64
 #define Exp32or64(exp32, exp64) (exp64)
@@ -37,35 +37,45 @@
 #define Exp32or64(exp32, exp64) (exp32)
 #endif
 
-#define VAR_NEVER_FREE			0
-#define VAR_ALWAYS_FREE			1
-#define VAR_FREE_IF_LARGE		2
-#define VAR_CLEAR_ALIASES		4
-#define VAR_REQUIRE_INIT		8
+#define VAR_NEVER_FREE 0
+#define VAR_ALWAYS_FREE 1
+#define VAR_FREE_IF_LARGE 2
+#define VAR_CLEAR_ALIASES 4
+#define VAR_REQUIRE_INIT 8
 
-enum ResultType {
-	FAIL = 0, OK, WARN = OK, CRITICAL_ERROR
-	, CONDITION_TRUE, CONDITION_FALSE
-	, LOOP_BREAK, LOOP_CONTINUE
-	, EARLY_RETURN, EARLY_EXIT
-	, FAIL_OR_OK
+enum ResultType
+{
+	FAIL = 0,
+	OK,
+	WARN = OK,
+	CRITICAL_ERROR,
+	CONDITION_TRUE,
+	CONDITION_FALSE,
+	LOOP_BREAK,
+	LOOP_CONTINUE,
+	EARLY_RETURN,
+	EARLY_EXIT,
+	FAIL_OR_OK
 };
 
 enum SymbolType
 {
-	PURE_NOT_NUMERIC
-	, PURE_INTEGER, PURE_FLOAT
-	, SYM_STRING = PURE_NOT_NUMERIC, SYM_INTEGER = PURE_INTEGER, SYM_FLOAT = PURE_FLOAT
+	PURE_NOT_NUMERIC,
+	PURE_INTEGER,
+	PURE_FLOAT,
+	SYM_STRING = PURE_NOT_NUMERIC,
+	SYM_INTEGER = PURE_INTEGER,
+	SYM_FLOAT = PURE_FLOAT
 #define IS_NUMERIC(symbol) ((symbol) == SYM_INTEGER || (symbol) == SYM_FLOAT)
-	, SYM_MISSING
-	, SYM_VAR
-	, SYM_OBJECT
-	, SYM_DYNAMIC
-	, SYM_TYPED_FIELD = 76
+		,
+	SYM_MISSING,
+	SYM_VAR,
+	SYM_OBJECT,
+	SYM_DYNAMIC,
+	SYM_TYPED_FIELD = 76
 };
 
-
-//const IID IID_IObjectComCompatible = { 0x619f7e25, 0x6d89, 0x4eb4, 0xb2, 0xfb, 0x18, 0xe7, 0xc7, 0x3c, 0xe, 0xa6 };
+// const IID IID_IObjectComCompatible = { 0x619f7e25, 0x6d89, 0x4eb4, 0xb2, 0xfb, 0x18, 0xe7, 0xc7, 0x3c, 0xe, 0xa6 };
 
 struct ExprTokenType;
 struct ResultToken;
@@ -77,9 +87,10 @@ struct DECLSPEC_NOVTABLE IObject : public IDispatch
 #define IObject_Invoke_PARAMS aResultToken, aFlags, aName, aThisToken, aParam, aParamCount
 	virtual ResultType Invoke(IObject_Invoke_PARAMS_DECL) = 0;
 	virtual LPTSTR Type() = 0;
-#define IObject_Type_Impl LPTSTR Type() { return _T(CLASSNAME); }
-	virtual Object* Base() = 0;
-	virtual bool IsOfType(Object* aPrototype) = 0;
+#define IObject_Type_Impl \
+	LPTSTR Type() { return _T(CLASSNAME); }
+	virtual Object *Base() = 0;
+	virtual bool IsOfType(Object *aPrototype) = 0;
 };
 
 #define MAXP_VARIADIC 255
@@ -93,19 +104,21 @@ public:
 		index_t size;
 		index_t length;
 	};
-	Data* data = &Empty;
-	struct OneT : public Data { char zero_buf[sizeof(T)]; };
+	Data *data = &Empty;
+	struct OneT : public Data
+	{
+		char zero_buf[sizeof(T)];
+	};
 	static OneT Empty;
 
-	index_t& Length() { return data->length; }
+	index_t &Length() { return data->length; }
 	index_t Capacity() { return data->size; }
-	T* Value() { return (T*)(data + 1); }
-	operator T* () { return Value(); }
+	T *Value() { return (T *)(data + 1); }
+	operator T *() { return Value(); }
 };
 
 template <typename T, typename index_t>
 typename FlatVector<T, index_t>::OneT FlatVector<T, index_t>::Empty;
-
 
 class Property;
 
@@ -123,8 +136,8 @@ struct ExprTokenType
 		{
 			union
 			{
-				IObject* object;
-				Var* var;
+				IObject *object;
+				Var *var;
 				LPTSTR marker;
 			};
 			union
@@ -137,31 +150,37 @@ struct ExprTokenType
 	SymbolType symbol;
 	ExprTokenType() : value_int64(0)
 #ifdef _WIN64
-		, marker_length(0)
+					  ,
+					  marker_length(0)
 #endif
-	{}
+	{
+	}
 	ExprTokenType(LPTSTR str) { SetValue(str); }
-	ExprTokenType(IObject* obj) { SetValue(obj); }
+	ExprTokenType(IObject *obj) { SetValue(obj); }
 	ExprTokenType(int val) { SetValue((__int64)val); }
 	ExprTokenType(__int64 val) { SetValue(val); }
 	ExprTokenType(double val) { SetValue(val); }
-	void SetValue(LPTSTR str, size_t len = -1) {
+	void SetValue(LPTSTR str, size_t len = -1)
+	{
 		marker = str, marker_length = len, symbol = SYM_STRING;
 	}
 	void SetValue(int val) { SetValue((__int64)val); }
-	void SetValue(__int64 val) {
+	void SetValue(__int64 val)
+	{
 		value_int64 = val, symbol = SYM_INTEGER;
 #ifdef _WIN64
 		marker_length = 0;
 #endif
 	}
-	void SetValue(double val) {
+	void SetValue(double val)
+	{
 		value_double = val, symbol = SYM_FLOAT;
 #ifdef _WIN64
 		marker_length = 0;
 #endif
 	}
-	void SetValue(IObject* obj) {
+	void SetValue(IObject *obj)
+	{
 		object = obj, symbol = SYM_OBJECT;
 #ifdef _WIN64
 		marker_length = 0;
@@ -174,7 +193,7 @@ struct ResultToken : public ExprTokenType
 	LPTSTR buf;
 	LPTSTR mem_to_free;
 #ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
-	IObject* named_params;
+	IObject *named_params;
 #endif
 	void *callee_id;
 
@@ -210,16 +229,16 @@ public:
 	{
 		__int64 mContentsInt64;
 		double mContentsDouble;
-		IObject* mObject;
+		IObject *mObject;
 	};
 	union
 	{
 		LPTSTR mCharContents;
-		char* mByteContents;
+		char *mByteContents;
 	};
 	union
 	{
-		Var* mAliasFor = nullptr;
+		Var *mAliasFor = nullptr;
 		VarSizeType mByteLength;
 	};
 	VarSizeType mByteCapacity = 0;
@@ -227,7 +246,7 @@ public:
 	VarAttribType mAttrib;
 	UCHAR mScope;
 	VarTypeType mType;
-	TCHAR* mName;
+	TCHAR *mName;
 };
 #pragma pack(pop)
 #pragma warning(pop)
@@ -240,11 +259,14 @@ public:
 	UINT mFlags;
 #endif
 	virtual bool Delete() = 0;
+
 public:
 	virtual ~ObjectBase() = 0;
 };
 
-class VarRef : public ObjectBase, public Var {};
+class VarRef : public ObjectBase, public Var
+{
+};
 
 class Object : public ObjectBase
 {
@@ -259,12 +281,13 @@ public:
 	typedef UINT index_t;
 	struct Variant
 	{
-		union {
+		union
+		{
 			__int64 n_int64;
 			double n_double;
-			IObject* object;
+			IObject *object;
 			String string;
-			Property* prop;
+			Property *prop;
 		};
 		SymbolType symbol;
 		TCHAR key_c;
@@ -290,7 +313,7 @@ public:
 		LastObjectFlag = 0x80
 	};
 
-	typedef Object* (*NewObjectProc)(size_t);
+	typedef Object *(*NewObjectProc)(size_t);
 	struct StructInfo
 	{
 		NewObjectProc create;
@@ -308,14 +331,14 @@ public:
 		bool is_unsigned;
 	};
 
-	Object* mBase = nullptr;
+	Object *mBase = nullptr;
 	FlatVector<FieldType, index_t> mFields;
 	Object *mOuter = nullptr;
 };
 class Array : public Object
 {
 public:
-	Variant* mItem = nullptr;
+	Variant *mItem = nullptr;
 	index_t mLength = 0, mCapacity = 0;
 
 	enum : index_t
@@ -334,7 +357,7 @@ public:
 	{
 		LPTSTR s;
 		IntKeyType i;
-		IObject* p;
+		IObject *p;
 	};
 	struct Pair : Variant
 	{
@@ -344,10 +367,10 @@ public:
 	enum MapOption : decltype(mFlags)
 	{
 		MapCaseless = LastObjectFlag << 1,
-			MapUseLocale = MapCaseless << 1
+		MapUseLocale = MapCaseless << 1
 	};
 
-	Pair* mItem = nullptr;
+	Pair *mItem = nullptr;
 	index_t mCount = 0, mCapacity = 0;
 
 	static const index_t mKeyOffsetInt = 0;
@@ -357,7 +380,7 @@ public:
 class BufferObject : public Object
 {
 public:
-	void* mData;
+	void *mData;
 	size_t mSize;
 };
 
@@ -366,15 +389,18 @@ class ComObject : public ObjectBase
 public:
 	union
 	{
-		IDispatch* mDispatch;
-		IUnknown* mUnknown;
-		SAFEARRAY* mArray;
-		void* mValPtr;
+		IDispatch *mDispatch;
+		IUnknown *mUnknown;
+		SAFEARRAY *mArray;
+		void *mValPtr;
 		__int64 mVal64;
 	};
-	void* mEventSink;
+	void *mEventSink;
 	VARTYPE mVarType;
-	enum { F_OWNVALUE = 1 };
+	enum
+	{
+		F_OWNVALUE = 1
+	};
 	USHORT mFlags;
 };
 
@@ -389,19 +415,19 @@ public:
 	virtual bool IsBuiltIn() = 0;
 	virtual bool ArgIsOutputVar(int aArg) = 0;
 	virtual bool ArgIsOptional(int aArg) = 0;
-	virtual bool Call(ResultToken& aResultToken, ExprTokenType* aParam[], int aParamCount) = 0;
+	virtual bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount) = 0;
 };
 
 class DECLSPEC_NOVTABLE EnumBase : public Func
 {
 public:
-	virtual ResultType Next(Var*, Var*) = 0;
+	virtual ResultType Next(Var *, Var *) = 0;
 };
 
 class ComArrayEnum : public EnumBase
 {
-	ComObject* mArrayObject;
-	void* mData;
+	ComObject *mArrayObject;
+	void *mData;
 	long mLBound, mUBound;
 	UINT mElemSize;
 	VARTYPE mType;
@@ -421,9 +447,10 @@ class BuiltInFunc : public NativeFunc
 {
 public:
 	BuiltInFunctionType mBIF;
-	union {
+	union
+	{
 		int mFID;
-		void* mData;
+		void *mData;
 	};
 	UCHAR *mOutputVars;
 };
@@ -444,43 +471,43 @@ struct FuncEntry
 #define BIFi(name, minp, maxp, bif, id, ...) {_T(#name), bif, minp, maxp, id, __VA_ARGS__}
 #define BIF1(name, minp, maxp, ...) {_T(#name), BIF_##name, minp, maxp, 0, __VA_ARGS__}
 
-typedef void (IObject::* ObjectMethod)(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+typedef void (IObject::*ObjectMethod)(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 class BuiltInMethod : public NativeFunc
 {
 public:
 	ObjectMethod mBIM;
-	Object* mClass;
+	Object *mClass;
 	UCHAR mMID;
 	UCHAR mMIT;
 };
 
 enum class MdType : UINT8
 {
-	Void		= 0,
-	Int8		= 1,
-	UInt8		= 2,
-	Int16		= 3,
-	UInt16		= 4,
-	Int32		= 5,
-	UInt32		= 6,
-	Int64		= 7,
-	UInt64		= 8,
-	IntPtr		= 9,
-	Float64		= 10,
-	Float32		= 11,
+	Void = 0,
+	Int8 = 1,
+	UInt8 = 2,
+	Int16 = 3,
+	UInt16 = 4,
+	Int32 = 5,
+	UInt32 = 6,
+	Int64 = 7,
+	UInt64 = 8,
+	IntPtr = 9,
+	Float64 = 10,
+	Float32 = 11,
 	String,
 	Object,
 	Variant, // Currently only for input (ExprTokenType) or retval (ResultToken).
 	Bool32,
 	ResultType,
 	FResult,
-	//NzIntWin32, // BOOL result where FALSE means failure and GetLastError() is applicable.
+	// NzIntWin32, // BOOL result where FALSE means failure and GetLastError() is applicable.
 	Struct,
 	Params,
 #ifdef ENABLE_MD_BITS
-	BitsBase	= 99, // For encoding a small literal value to insert into the parameter list.
+	BitsBase = 99, // For encoding a small literal value to insert into the parameter list.
 #endif
-	Optional	= 0x80,
+	Optional = 0x80,
 	RetVal,
 	Out,
 #ifdef ENABLE_MD_THISCALL
@@ -500,12 +527,12 @@ enum class MdType : UINT8
 };
 class MdFunc : public NativeFunc
 {
-	void *mMcFunc; // Pointer to native function.
-	Object *mPrototype; // Prototype object used for type checking; a non-null value implies mMcFunc is a member function.
-	MdType *mArgType; // Sequence of native arg types and modifiers.
-	MdType mRetType; // Type of native return value (not necessarily the script return value).
+	void *mMcFunc;			// Pointer to native function.
+	Object *mPrototype;		// Prototype object used for type checking; a non-null value implies mMcFunc is a member function.
+	MdType *mArgType;		// Sequence of native arg types and modifiers.
+	MdType mRetType;		// Type of native return value (not necessarily the script return value).
 	UINT8 mMaxResultTokens; // Number of ResultTokens that might be allocated for conversions.
-	UINT8 mArgSlots; // Number of DWORD_PTRs needed for the parameter list.
+	UINT8 mArgSlots;		// Number of DWORD_PTRs needed for the parameter list.
 	bool mThisCall;
 };
 
@@ -517,13 +544,12 @@ struct ObjectMember
 };
 
 #define Object_Member(name, impl, id, invokeType, ...) \
-	{ _T(#name), static_cast<ObjectMethod>(&impl), id, invokeType, __VA_ARGS__ }
-#define Object_Method_(name, minP, maxP, impl, id) Object_Member(name, impl,   id,       IT_CALL, minP, maxP)
-#define Object_Method(name, minP, maxP)            Object_Member(name, Invoke, M_##name, IT_CALL, minP, maxP)
-#define Object_Method1(name, minP, maxP)           Object_Member(name, name,   0,        IT_CALL, minP, maxP)
-#define Object_Property_get(name, ...)             Object_Member(name, Invoke, P_##name, IT_GET, __VA_ARGS__)
-#define Object_Property_get_set(name, ...)         Object_Member(name, Invoke, P_##name, IT_SET, __VA_ARGS__)
-
+	{_T(#name), static_cast<ObjectMethod>(&impl), id, invokeType, __VA_ARGS__}
+#define Object_Method_(name, minP, maxP, impl, id) Object_Member(name, impl, id, IT_CALL, minP, maxP)
+#define Object_Method(name, minP, maxP) Object_Member(name, Invoke, M_##name, IT_CALL, minP, maxP)
+#define Object_Method1(name, minP, maxP) Object_Member(name, name, 0, IT_CALL, minP, maxP)
+#define Object_Property_get(name, ...) Object_Member(name, Invoke, P_##name, IT_GET, __VA_ARGS__)
+#define Object_Property_get_set(name, ...) Object_Member(name, Invoke, P_##name, IT_SET, __VA_ARGS__)
 
 #define EXPORT
 
@@ -541,10 +567,13 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID = 0);
 EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1 = NULL, LPTSTR param2 = NULL, LPTSTR param3 = NULL, LPTSTR param4 = NULL, LPTSTR param5 = NULL, LPTSTR param6 = NULL, LPTSTR param7 = NULL, LPTSTR param8 = NULL, LPTSTR param9 = NULL, LPTSTR param10 = NULL, DWORD aThreadID = 0);
 EXPORT int ahkReady(DWORD aThreadID = 0);
 
+EXPORT void ahkSuppressUserKeys(bool aSuppress);
+
 class IAhkApi : public IUnknown
 {
 public:
-	enum class ObjectType {
+	enum class ObjectType
+	{
 		Object,
 		Array,
 		Buffer,
@@ -564,8 +593,20 @@ public:
 
 	enum class ErrorType
 	{
-		Error, Index, Member, Property, Method, Memory, OS,
-		Target, Timeout, Type, Unset, UnsetItem, Value, ZeroDivision
+		Error,
+		Index,
+		Member,
+		Property,
+		Method,
+		Memory,
+		OS,
+		Target,
+		Timeout,
+		Type,
+		Unset,
+		UnsetItem,
+		Value,
+		ZeroDivision
 	};
 
 	class Prototype : public Object
@@ -643,5 +684,5 @@ public:
 	virtual Func *STDMETHODCALLTYPE MdFunc_New(LPCTSTR aName, void *aFuncPtr, MdType *aSig, Object *aPrototype = nullptr);
 };
 
-EXPORT IAhkApi* ahkGetApi(void* options = nullptr);
+EXPORT IAhkApi *ahkGetApi(void *options = nullptr);
 #endif
